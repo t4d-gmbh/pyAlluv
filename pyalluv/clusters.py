@@ -13,7 +13,7 @@ class Cluster(object):
     -----
 
     The vertical position of a cluster will be set when creating a
-    :class:`~pyalluv.plotting.AlluvialPlot`.
+    :class:`~pyalluv.plotting.Alluvial`.
 
     Parameters
     -----------

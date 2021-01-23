@@ -2,7 +2,7 @@ from copy import deepcopy
 from matplotlib import pyplot as plt
 import matplotlib.gridspec as gridspec
 
-from pyalluv import AlluvialPlot, Cluster, Flux
+from pyalluv import Alluvial, Cluster, Flux
 
 # Create the sequence of clusterings
 time_points = [0, 4, 9, 14, 18.2]
@@ -63,7 +63,7 @@ if True:
     ax_sk.axis('equal')
     ax_sk.set_xlim(0, 25)
     ax_sk.set_ylim(-0.6, 3)
-    AlluvialPlot(clustering_sequence, ax_sk, **alluvial_plot_params)
+    Alluvial(clustering_sequence, ax_sk, **alluvial_plot_params)
     ax_sk.set_xticks(time_points, minor=False)
     ax_sk.set_xticklabels(
         [

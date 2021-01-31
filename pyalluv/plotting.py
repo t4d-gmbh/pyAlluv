@@ -12,56 +12,58 @@ class _Cluster(object):
     r"""
     This class defines the cluster objects for an alluvial diagram.
 
-    Note
-    -----
-
-    The vertical position of a cluster will be set when creating a
-    :class:`~pyalluv.plotting.Alluvial`.
-
-    Parameters
-    -----------
-
-    height: float, int
-      The cluster size which will translate into the height of this cluster.
-    anchor: float (default=None)
-      Set the anchor position. Either only the horizontal position, both
-      :math:`(x, y)` or nothing can be provided.
-    width: float (default=1.0)
-      Set the cluster width.
-    label: str (default=None)
-      The label for this cluster, that can be shown in the diagram
-    \**kwargs optional parameter:
-      x_anchor: ``'center'``, ``'left'`` or ``'right'`` (default='center')
-        Determine where the anchor position is relative to the rectangle
-        that will represent this cluster. Options are either the left or
-        right corner or centered:
-      linewidth: float (default=0.0)
-        Set the width of the line surrounding a cluster.
-      label_margin: tuple(horizontal, vertical)
-        Sets horizontal and vertical margins for the label of a cluster.
-
-    Attributes
-    -----------
-    x_pos: float
-      Horizontal position of the cluster anchor.
-    y_pos: float
-      Vertical position of the cluster center.
-    x_anchor: str
-      Anchor position relative to the rectangle representing the cluster.
-      Possible values are: ``'center'``, ``'left'`` or ``'right'``.
-    height: float
-      Size of the cluster that will determine its height in the diagram.
-    width: float
-      Width of the cluster. In the same units as ``x_pos``.
-    label: str
-      Label, id or name of the cluster.
-    in_fluxes: list[:class:`~pyalluv.fluxes.Flux`]
-      All incoming fluxes of this cluster.
-    out_fluxes: list[:class:`~pyalluv.fluxes.Flux`]
-      All outgoing fluxes of this cluster.
 
     """
     def __init__(self, height, anchor=None, width=1.0, label=None, **kwargs):
+        """
+        Note
+        -----
+
+        The vertical position of a cluster will be set when creating a
+        :class:`~pyalluv.plotting.Alluvial`.
+
+        Parameters
+        -----------
+
+        height: float, int
+          The cluster size which will translate into the height of this cluster.
+        anchor: float (default=None)
+          Set the anchor position. Either only the horizontal position, both
+          :math:`(x, y)` or nothing can be provided.
+        width: float (default=1.0)
+          Set the cluster width.
+        label: str (default=None)
+          The label for this cluster, that can be shown in the diagram
+        **kwargs optional parameter:
+          x_anchor: ``'center'``, ``'left'`` or ``'right'`` (default='center')
+            Determine where the anchor position is relative to the rectangle
+            that will represent this cluster. Options are either the left or
+            right corner or centered:
+          linewidth: float (default=0.0)
+            Set the width of the line surrounding a cluster.
+          label_margin: tuple(horizontal, vertical)
+            Sets horizontal and vertical margins for the label of a cluster.
+
+        Attributes
+        -----------
+        x_pos: float
+          Horizontal position of the cluster anchor.
+        y_pos: float
+          Vertical position of the cluster center.
+        x_anchor: str
+          Anchor position relative to the rectangle representing the cluster.
+          Possible values are: ``'center'``, ``'left'`` or ``'right'``.
+        height: float
+          Size of the cluster that will determine its height in the diagram.
+        width: float
+          Width of the cluster. In the same units as ``x_pos``.
+        label: str
+          Label, id or name of the cluster.
+        in_fluxes: list[:class:`~pyalluv.fluxes.Flux`]
+          All incoming fluxes of this cluster.
+        out_fluxes: list[:class:`~pyalluv.fluxes.Flux`]
+          All outgoing fluxes of this cluster.
+        """
         self._interp_steps = kwargs.pop('_interpolation_steps', 1)
         self.x_anchor = kwargs.pop('x_anchor', 'center')
         self.label = label
@@ -577,7 +579,7 @@ class _Flux(object):
         return flux_patch
 
 
-class Alluvial(object):
+class Alluvial:
     """
     Alluvial diagram.
 
@@ -587,7 +589,8 @@ class Alluvial(object):
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
     def __init__(
-        self, clusters, ax=None, y_pos='overwrite', cluster_w_spacing=1,
+        self,
+        clusters, ax=None, y_pos='overwrite', cluster_w_spacing=1,
         cluster_kwargs={}, flux_kwargs={}, label_kwargs={},
         **kwargs
     ):
@@ -678,7 +681,7 @@ class Alluvial(object):
               ``'source_cluster'`` or ``'target_cluster'`` and determines the
               cluster from which the color is taken.
 
-              **Examples\:**
+              **Examples:**
 
               ``facecolor='cluster_reside'``
                 set `facecolor` to the color of the source cluster if both source
@@ -688,7 +691,7 @@ class Alluvial(object):
                 set `edgecolor` to the color of the source cluster if source and
                 target cluster are of different colors.
 
-        \**kwargs optional parameter:
+        **kwargs optional parameter:
             x_lim: tuple
               the horizontal limit values for the :class:`~matplotlib.axes.Axes`.
             y_lim: tuple
@@ -740,6 +743,7 @@ class Alluvial(object):
             fig = plt.figure()
             # TODO: not sure if specifying the ticks is necessary
             ax = fig.add_subplot(1, 1, 1, xticks=[], yticks=[])
+        self.ax = ax
 
         # if clusters are given in a list of lists (each list is a x position)
         self._set_x_pos = kwargs.get('set_x_pos', True)
@@ -780,8 +784,8 @@ class Alluvial(object):
             if self.format_xaxis:
                 locator = mdates.AutoDateLocator(minticks=3)
                 formatter = mdates.AutoDateFormatter(locator)
-                ax.xaxis.set_major_locator(locator)
-                ax.xaxis.set_major_formatter(formatter)
+                self.ax.xaxis.set_major_locator(locator)
+                self.ax.xaxis.set_major_formatter(formatter)
             self._x_dates = True
             if (self.x_positions[-1] - self.x_positions[0]).days < 2 * 30:
                 _minor_tick = 'weeks'
@@ -866,20 +870,20 @@ class Alluvial(object):
             cluster_kwargs=self._cluster_kwargs,
             flux_kwargs=self._flux_kwargs
         )
-        ax.add_collection(patch_collection)
+        self.ax.add_collection(patch_collection)
         if self.with_cluster_labels:
             label_collection = self.get_labelcollection(**label_kwargs)
             if label_collection:
                 for label in label_collection:
-                    ax.annotate(**label)
-        ax.set_xlim(
+                    self.ax.annotate(**label)
+        self.ax.set_xlim(
             *self.x_lim
         )
-        ax.set_ylim(
+        self.ax.set_ylim(
             *self.y_lim
         )
         if self._fill_figure:
-            ax.set_position(
+            self.ax.set_position(
                 [
                     0.0,
                     self._x_axis_offset,
@@ -888,15 +892,142 @@ class Alluvial(object):
                 ]
             )
         if self._invisible_y:
-            ax.get_yaxis().set_visible(False)
+            self.ax.get_yaxis().set_visible(False)
         if self._invisible_x:
-            ax.get_xaxis().set_visible(False)
-        ax.spines['right'].set_color('none')
-        ax.spines['left'].set_color('none')
-        ax.spines['top'].set_color('none')
-        ax.spines['bottom'].set_color('none')
+            self.ax.get_xaxis().set_visible(False)
+        self.ax.spines['right'].set_color('none')
+        self.ax.spines['left'].set_color('none')
+        self.ax.spines['top'].set_color('none')
+        self.ax.spines['bottom'].set_color('none')
         if isinstance(self.x_positions[0], datetime) and self.format_xaxis:
-            self.set_dates_xaxis(ax, _minor_tick)
+            self.set_dates_xaxis(_minor_tick)
+
+    def add(self, blocksize, flows, ext=None, yoff=0, fractionflow=False, **kwargs):
+        r"""
+        Add an Alluvial diagram with a vertical offset.
+        The offset must be provided in the same units of the block sizes.
+
+        Parameters
+        ----------
+        blocksize : array-like
+            The size of each block.
+            Supported formats are:
+
+            - Sequence of block sizes for the initial column in the Alluvial
+              diagram.
+            - (M, N) array-like object with M defining the number of columns in
+              the Alluvial diagram and N the maximal number of distinct blocks
+              over all columns.
+
+            If *blocksize* is an (N, M) array-like object, *ext* will be
+            ignored. In this case the column _i_ in the Alluvial
+            diagram will display all non-zero elements in blocksize[i].
+
+            If a sequence of numbers is provided, then *flows* and *ext* are
+            used to iteratively create an (N, M) array of bock sizes
+            (see Notes for details).
+
+            sequence of block sizes for the initial column
+            in the Alluvial diagram, then
+        flows : array like
+            The flows between columns of the Alluvial diagram, given in the
+            shape (M-1, N, N).
+
+            *flows[i]* determines the flow matrix from blocks in column
+            _i_ to the blocks in column _i+1_, thus for an Alluvial diagram
+            consisting of M columns only M-1 flow matrices are required.
+        ext : array like, optional
+            an array of the shape (M, N) that allows to specify an external
+            influx to the blocks. This can be used if nodes appear from one
+            column of the Alluvial diagram to the next.
+        fractionflow : bool, default: False
+            If set to *True* the values in *flows* are considered to be
+            fractions of block sizes.
+            In this case, the actual flow between columns _i_ and _i+1_ is then
+            given by the dot product of the (N x N) matrix, flows[i], and the
+            array of block sizes, blocksize[i].
+            When set to *False* (the default) the values in *flows* are
+            considered to be absolute values in the same unit as the values in
+            *blocksize*.
+        yoff : int or float, default: 0
+            A constant vertical offset applied to all added blocks.
+
+            thus for any column _i_ *flows[i]* should have
+            columns with a sum bounded by 1.
+
+            Note that if *blocksize* is a simple *fractionflow* is False (default) and blocksize is a
+            simple sequence
+
+        Notes
+        -----
+        When a sequence if provided for *blocksize* then *flows* and *ext* are
+        used to construct an (M, N) array of block sizes. This procedure
+        changes depending on whether *flows* provides fractions of block sizes
+        (if *fractionflow* is set to True) or absolute values (default,
+        *fracionflow* is False)
+
+        - *fractionflwo* is False:
+
+          Suppose :math:`\textbf{e}_{i+1}` is the array of external influx to
+          column :math:`i+1`, given by *ext[i]*,  and :math:`\mathbf{F}_i` is
+          the flow matrix between columns :math:`i` and :math:`i+1`, given by
+          *flux[i]*, then :
+
+          .. math::
+              \textbf{b}_{i+1} = \mathbf{F}_i \cdot \textbf{1} + \textbf{e}_{i+1},
+
+          where :math:`\textbf{1}` is a unit vector of length N.
+
+        - *fractionflwo* is True:
+
+          We have:
+
+          .. math::
+              \textbf{b}_{i+1} = \mathbf{F}_i \cdot \textbf{b}_i + \textbf{e}_{i+1}
+
+          with :math:`\textbf{b}_i` the array of block sizes in column
+          :math:`i`, :math:`\textbf{e}_{i+1}` the array of external influx to
+          column :math:`i+1` and :math:`\mathbf{F}_i` the flow matrix between
+          columns :math:`i` and :math:`i+1`, given by *flux[i]*.
+
+        """
+        # TODO: Implement all this
+
+        # Create the sequence of clusterings
+        time_points = [0, 4, 9, 14, 18.2]
+        # Define the cluster sizes per snapshot
+        # at each time point {cluster_id: cluster_size})
+        cluster_sizes = [{0: 3}, {0: 5}, {0: 3, 1: 2}, {0: 5}, {0: 4}]
+        # Define the membership fluxes between neighbouring clusterings
+        between_fluxes = [
+            {(0, 0): 3},  # key: (from cluster, to cluster), value: size
+            {(0, 0): 3, (0, 1): 2},
+            {(0, 0): 3, (1, 0): 2},
+            {(0, 0): 4}
+        ]
+        # set the colors
+        cluster_color = {0: "C1", 1: "C2"}
+        # create a dictionary with the time points as keys and a list of clusters
+        # as values
+        clustering_sequence = {}
+        for tp, clustering in enumerate(cluster_sizes):
+            clustering_sequence[time_points[tp]] = [
+                _Cluster(
+                    height=clustering[cid],
+                    label="{0}".format(cid),
+                    facecolor=cluster_color[cid],
+                ) for cid in clustering
+            ]
+        # now create the fluxes between the clusters
+        for tidx, tp in enumerate(time_points[1:]):
+            fluxes = between_fluxes[tidx]
+            for from_csid, to_csid in fluxes:
+                _Flux(
+                    flux=fluxes[(from_csid, to_csid)],
+                    source_cluster=clustering_sequence[time_points[tidx]][from_csid],
+                    target_cluster=clustering_sequence[tp][to_csid],
+                    facecolor='source_cluster'
+                )
 
     def distribute_clusters(self, x_pos):
         r"""
@@ -1007,15 +1138,13 @@ class Alluvial(object):
                 _max_y
             ) if self.y_max is not None else _max_y
 
-    def set_dates_xaxis(self, ax, resolution='months'):
+    def set_dates_xaxis(self, resolution='months'):
         r"""
         Format the x axis in case :class:`~datetime.datetime` objects are
         provide for the horizontal placement of clusters.
 
         Parameters
         -----------
-        ax: :class:`~matplotlib.axes.Axes`
-          Object to plot the alluvial diagram on.
         resolution: str (default='months')
           Possible values are ``'months'`` and ``'weeks'``.
           This determines the resolution of the minor ticks via
@@ -1036,17 +1165,17 @@ class Alluvial(object):
         if resolution == 'months':
             monthsFmt = mdates.DateFormatter('%b')
             yearsFmt = mdates.DateFormatter('\n%Y')  # add space
-            ax.xaxis.set_minor_locator(months)
-            ax.xaxis.set_minor_formatter(monthsFmt)
-            ax.xaxis.set_major_locator(years)
-            ax.xaxis.set_major_formatter(yearsFmt)
+            self.ax.xaxis.set_minor_locator(months)
+            self.ax.xaxis.set_minor_formatter(monthsFmt)
+            self.ax.xaxis.set_major_locator(years)
+            self.ax.xaxis.set_major_formatter(yearsFmt)
         elif resolution == 'weeks':
             monthsFmt = mdates.DateFormatter('\n%b')
             weeksFmt = mdates.DateFormatter('%b %d')
-            ax.xaxis.set_minor_locator(weeks)
-            ax.xaxis.set_minor_formatter(weeksFmt)
-            ax.xaxis.set_major_locator(months)
-            ax.xaxis.set_major_formatter(monthsFmt)
+            self.ax.xaxis.set_minor_locator(weeks)
+            self.ax.xaxis.set_minor_formatter(weeksFmt)
+            self.ax.xaxis.set_major_locator(months)
+            self.ax.xaxis.set_major_formatter(monthsFmt)
 
     def _swap_clusters(self, n1, n2, direction='backwards'):
         squared_diff = {}

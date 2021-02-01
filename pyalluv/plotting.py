@@ -1,4 +1,4 @@
-from __future__ import division, absolute_import, unicode_literals
+import numpy as np
 from matplotlib.collections import PatchCollection
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
@@ -589,8 +589,7 @@ class Alluvial:
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
     def __init__(
-        self,
-        clusters, ax=None, y_pos='overwrite', cluster_w_spacing=1,
+        self, clusters, ax=None, y_pos='overwrite', cluster_w_spacing=1,
         cluster_kwargs={}, flux_kwargs={}, label_kwargs={},
         **kwargs
     ):
@@ -737,6 +736,12 @@ class Alluvial:
         clusters: dict
           Holds for each vertical position a list of :obj:`.Cluster` objects.
         """
+        self._diagrams = []
+        self._extouts = []
+        self._diagc = 0
+        self._dlabels = []
+        self._dirty = False  # indicate if between diagram flows exist
+
         # create axes if not provided
         if ax is None:
             import matplotlib.pyplot as plt
@@ -744,6 +749,18 @@ class Alluvial:
             # TODO: not sure if specifying the ticks is necessary
             ax = fig.add_subplot(1, 1, 1, xticks=[], yticks=[])
         self.ax = ax
+
+        # store the inputs
+        self.y_pos = y_pos
+        self.cluster_w_spacing = cluster_w_spacing
+        self._cluster_kwargs = cluster_kwargs
+        self._flux_kwargs = flux_kwargs
+        self._label_kwargs = label_kwargs
+
+        # if args are provided, call add and finish()
+        if kwargs:
+            self.add(**kwargs)
+            self.finish()
 
         # if clusters are given in a list of lists (each list is a x position)
         self._set_x_pos = kwargs.get('set_x_pos', True)
@@ -753,8 +770,6 @@ class Alluvial:
         )
         self.with_cluster_labels = kwargs.get('with_cluster_labels', True)
         self.format_xaxis = kwargs.get('format_xaxis', True)
-        self._cluster_kwargs = cluster_kwargs
-        self._flux_kwargs = flux_kwargs
         self._x_axis_offset = kwargs.get('x_axis_offset', 0.0)
         self._fill_figure = kwargs.get('fill_figure', False)
         self._invisible_y = kwargs.get('invisible_y', True)
@@ -812,7 +827,6 @@ class Alluvial:
                 for cluster in self.clusters[x_pos]:
                     cluster_widths.append(cluster.width)
         self.cluster_width = kwargs.get('cluster_width', None)
-        self.cluster_w_spacing = cluster_w_spacing
         self.x_lim = kwargs.get(
             'x_lim',
             (
@@ -823,7 +837,7 @@ class Alluvial:
             )
         )
         self.y_min, self.y_max = None, None
-        if y_pos == 'overwrite':
+        if self.y_pos == 'overwrite':
             # reset the vertical positions for each row
             for x_pos in self.x_positions:
                 self.distribute_clusters(x_pos)
@@ -872,7 +886,7 @@ class Alluvial:
         )
         self.ax.add_collection(patch_collection)
         if self.with_cluster_labels:
-            label_collection = self.get_labelcollection(**label_kwargs)
+            label_collection = self.get_labelcollection(**self._label_kwargs)
             if label_collection:
                 for label in label_collection:
                     self.ax.annotate(**label)
@@ -902,96 +916,157 @@ class Alluvial:
         if isinstance(self.x_positions[0], datetime) and self.format_xaxis:
             self.set_dates_xaxis(_minor_tick)
 
-    def add(self, blocksize, flows, ext=None, yoff=0, fractionflow=False, **kwargs):
+    def _to_valid_sequence(self, data, attribute):
+        try:
+            data = np.asfarray(data)
+        except ValueError:
+            try:
+                _data = iter(data)
+            except TypeError:
+                raise TypeError("'{attr}' must be an iterable sequence and"
+                                " should be of type list or numpy.ndarray,"
+                                " '{ftype}' is not supported."
+                                .format(attr=attribute, ftype=type(data)))
+            else:
+                data = []
+                for i, d in enumerate(_data):
+                    try:
+                        data.append(np.asfarray(d))
+                    except ValueError:
+                        raise ValueError("{attr} can only contain array-like"
+                                         " objects, which is not the case"
+                                         " for entry {entry} in the provided"
+                                         " argument."
+                                         .format(attr=attribute, entry=i))
+        finally:
+            return data
+
+    def add(self, flows, ext=None, extout=None, label=None, yoff=0,
+            fractionflow=False, **kwargs):
         r"""
         Add an Alluvial diagram with a vertical offset.
-        The offset must be provided in the same units of the block sizes.
+        The offset must be provided in the same units as the block sizes.
 
         Parameters
         ----------
-        blocksize : array-like
-            The size of each block.
-            Supported formats are:
-
-            - Sequence of block sizes for the initial column in the Alluvial
-              diagram.
-            - (M, N) array-like object with M defining the number of columns in
-              the Alluvial diagram and N the maximal number of distinct blocks
-              over all columns.
-
-            If *blocksize* is an (N, M) array-like object, *ext* will be
-            ignored. In this case the column _i_ in the Alluvial
-            diagram will display all non-zero elements in blocksize[i].
-
-            If a sequence of numbers is provided, then *flows* and *ext* are
-            used to iteratively create an (N, M) array of bock sizes
-            (see Notes for details).
-
-            sequence of block sizes for the initial column
-            in the Alluvial diagram, then
-        flows : array like
-            The flows between columns of the Alluvial diagram, given in the
-            shape (M-1, N, N).
+        flows : sequence of array-like objects
+            The flows between columns of the Alluvial diagram.
 
             *flows[i]* determines the flow matrix from blocks in column
-            _i_ to the blocks in column _i+1_, thus for an Alluvial diagram
-            consisting of M columns only M-1 flow matrices are required.
-        ext : array like, optional
-            an array of the shape (M, N) that allows to specify an external
-            influx to the blocks. This can be used if nodes appear from one
-            column of the Alluvial diagram to the next.
+            *i* to the blocks in column *i+1*.
+
+            Note that an Alluvial diagram with M columns needs *flows* to be
+            a sequence of M-1 array-like objects.
+        ext : sequence, optional
+            External inflow to the Alluvial diagram. Supported formats are:
+
+            - sequence of M array-like objects: Specify for each of the M
+              columns in the diagram the inflows to the blocks.
+            - sequence of floats: Set the block sizes in the initial column.
+
+            If *ext* is not provided, the block sizes for the initial columns
+            are inferred from the first entry in *flows* as the column-wise sum
+            of *flows[0]*.
+        extout : iterable, optional
+            The outflows to blocks belonging to another Alluvial diagram.
+            The values provided in *extout* must be of the shape (M-1, N, P),
+            with N the number of blocks in the diagram that is added and P the
+            number of blocks in the destination diagram to which the flows will
+            be directed.
+
+            If a dictionary is provided a key must specify the destination
+            diagram. Allowed is either the label, *dlabel*, or the index of a
+            diagram.
+
+            If a list is provided the entries are mapped to diagrams by index.
+        label : string, optional
+            The label of the diagram to add.
         fractionflow : bool, default: False
-            If set to *True* the values in *flows* are considered to be
-            fractions of block sizes.
-            In this case, the actual flow between columns _i_ and _i+1_ is then
-            given by the dot product of the (N x N) matrix, flows[i], and the
-            array of block sizes, blocksize[i].
             When set to *False* (the default) the values in *flows* are
-            considered to be absolute values in the same unit as the values in
-            *blocksize*.
+            considered to be absolute values.
+
+            If set to *True* the values in *flows* are considered to be
+            fractions of block sizes, and the actual flow between columns *i*
+            and *i+1* is given by the dot product of *flows[i]* and the array
+            of block sizes in column *i*.
+
+            If fractions are provided,  you must set *ext* to provide at least
+            the block sizes for the initial column of the Alluvial diagram.
         yoff : int or float, default: 0
-            A constant vertical offset applied to all added blocks.
+            A constant vertical offset applied to the added diagram.
 
-            thus for any column _i_ *flows[i]* should have
-            columns with a sum bounded by 1.
-
-            Note that if *blocksize* is a simple *fractionflow* is False (default) and blocksize is a
-            simple sequence
 
         Notes
         -----
-        When a sequence if provided for *blocksize* then *flows* and *ext* are
-        used to construct an (M, N) array of block sizes. This procedure
-        changes depending on whether *flows* provides fractions of block sizes
-        (if *fractionflow* is set to True) or absolute values (default,
-        *fracionflow* is False)
+        The procedure to set the block sizes of column *i+1* changes depending
+        on whether *flows* provides fractions of block sizes (if *fractionflow*
+        is set to True) or absolute values (default, *fractionflow* is False).
+        For a column *i* with N blocks and the column *i+1* with P blocks, the
+        relation is defined as as follows:
 
-        - *fractionflwo* is False:
+        - *fractionflow* is False:
 
-          Suppose :math:`\textbf{e}_{i+1}` is the array of external influx to
-          column :math:`i+1`, given by *ext[i]*,  and :math:`\mathbf{F}_i` is
-          the flow matrix between columns :math:`i` and :math:`i+1`, given by
-          *flux[i]*, then :
+          The block sizes in column *i+1* are given by:
 
           .. math::
-              \textbf{b}_{i+1} = \mathbf{F}_i \cdot \textbf{1} + \textbf{e}_{i+1},
+              \textbf{c}_{i+1} = \mathbf{F}_i\cdot\textbf{1}+\textbf{e}_{i+1},
 
-          where :math:`\textbf{1}` is a unit vector of length N.
+          where :math:`\mathbf{F}_i` is the flow matrix of shape (P, N), given
+          by *flux[i]*, :math:`\textbf{1}` is a vector of ones of shape (N) and
+          :math:`\textbf{e}_{i+1}` is the external influx vector of shape (P),
+          given by *e[i+1]*.
+        - *fractionflow* is True:
 
-        - *fractionflwo* is True:
-
-          We have:
+          The block sizes in column *i+1* depend directly on the block sizes of
+          column *i*, :math:`\textbf{c}_{i}`, and are given by:
 
           .. math::
-              \textbf{b}_{i+1} = \mathbf{F}_i \cdot \textbf{b}_i + \textbf{e}_{i+1}
+              \textbf{c}_{i+1}=\mathbf{F}_i\cdot\textbf{c}_i+\textbf{e}_{i+1},
 
-          with :math:`\textbf{b}_i` the array of block sizes in column
-          :math:`i`, :math:`\textbf{e}_{i+1}` the array of external influx to
-          column :math:`i+1` and :math:`\mathbf{F}_i` the flow matrix between
-          columns :math:`i` and :math:`i+1`, given by *flux[i]*.
-
+          where :math:`\mathbf{F}_i` is the flow matrix of shape (P, N), given
+          by *flux[i]*, :math:`\textbf{c}_i` the vector of N block sizes in
+          column *i* and :math:`\textbf{e}_{i+1}` the external influx vector of
+          shape (P) given by *e[i+1]*.
         """
-        # TODO: Implement all this
+        # check the provided arguments
+        flows = self._to_valid_sequence(flows, 'flows')
+        nbr_cols = len(flows) + 1
+        # check ext and set initial column
+        if ext is None:
+            if fractionflow:
+                raise TypeError("'ext' cannot be None if 'fractionflow' is"
+                                " True: You need to provide at least the block"
+                                " sizes for the first column of the Alluvial"
+                                " diagram if the flows are given as"
+                                " fractions.")
+            ext = np.zeros(nbr_cols)
+            _cinit = flows[0].sum(0)
+        else:
+            ext = self._to_valid_sequence(ext, 'ext')
+            if isinstance(ext[0], np.ndarray):
+                _cinit = ext[0]
+            else:
+                _cinit = ext[:]
+                ext = np.zeros(nbr_cols)
+
+        # create the columns
+        _columns = [_cinit]
+        for flow, e in zip(flows, ext[1:]):
+            if not fractionflow:
+                _col = flow.sum(1) + e
+            else:
+                _col = flow.dot(_columns[-1]) + e
+            _columns.append(_col)
+
+        if extout is not None:
+            # check extout format
+            pass
+
+        # add the new diagram
+        self._diagrams.append(_columns)
+        self._dlabels.append(label or f'diagram-{self._diagc}')
+        self._extouts.append(extout)
+        self._diagc += 1
 
         # Create the sequence of clusterings
         time_points = [0, 4, 9, 14, 18.2]

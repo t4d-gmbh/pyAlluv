@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib.collections import PatchCollection
 from matplotlib import docstring
 from matplotlib import cbook
-from maptlotlib import _api
+from maptlotlib import _api, transforms
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.path import Path
@@ -19,6 +19,7 @@ __author__ = 'Jonas I. Liechti'
 
 
 @cbook._define_aliases({
+    "verticalalignment": ["va"],
     "horizontalalignment": ["ha"],
 })
 class _Block(Patch):
@@ -33,8 +34,8 @@ class _Block(Patch):
     """
     @docstring.depend_interpd
     def __init__(self, height, anchor=None, width=1.0, label=None,
-                 horizontalalignment='center', label_margin=(0, 0),
-                 pathprops=None, **kwargs):
+                 horizontalalignment='center', verticalalignment='bottom',
+                 label_margin=(0, 0), pathprops=None, **kwargs):
         """
         Parameters
         -----------
@@ -48,7 +49,9 @@ class _Block(Patch):
         label : str, optional
           Block label that can be displayed in the diagram.
         horizontalalignment : {'center', 'left', 'right'}, default: 'center'
-          Determine the location of the anchor point of the block.
+          The horizontal location of the anchor point of the block.
+        verticalalignment: {'center', 'top', 'bottom'}, default: 'center'
+          The vertical location of the anchor point of the block.
         label_margin: (float, float), default: (0., 0.)
             x and y margin in target coordinates of ``self.get_transform()``
             and added to the *anchor* point to set the point to draw the label.
@@ -64,35 +67,21 @@ class _Block(Patch):
         pathprops : None
           TODO: This might be not needed, it's rather unlikely to be used.
           Keyword arguments that are passed to `matplotlib.path.Path`.
-
-
-        Attributes
-        -----------
-        x: float
-          Horizontal position of the cluster anchor.
-        y: float
-          Vertical position of the cluster center.
-        height: float
-          Size of the cluster that will determine its height in the diagram.
-        width: float
-          Width of the cluster. In the same units as ``x``.
-        label: str
-          Label, id or name of the cluster.
-        out_fluxes: list[:class:`~pyalluv.fluxes.Flux`]
-          All outgoing fluxes of this cluster.
         """
         # TODO: only keep what's in else:
         if isinstance(height, (list, tuple)):
-            self.height = len(height)
+            self._height = len(height)
         else:
-            self.height = height
-        self.width = width
+            self._height = height
+        self._width = width
 
-        self.label = label or ''
+        # self.label = label or ''
+        self.set_label(label)
         self.label_margin = label_margin
         self.pathprops = pathprops or dict()
         self.set_horizontalalignment(horizontalalignment)
-        self.anchor = anchor
+        self.set_verticalalignment(verticalalignment)
+        self.set_anchor(anchor)
         _x, _y = self._get_xy_from_anchor(anchor)
         self.set_x(_x)
         self.set_y(_y)  # this also sets *_mid_height*
@@ -114,88 +103,151 @@ class _Block(Patch):
         # TODO: this is not necessarily the place to run this:
         super().__init__(**kwargs)
 
-    def set_outflows(self, outflows):
-        self._outflows = outflows
+    def get_path(self):
+        """Return the vertices of the block."""
+        # vertices = [
+        #     (self._x0, self._y0),
+        #     (self._x0, self._y0 + self._height),
+        #     (self._x0 + self._width, self._y0 + self._height),
+        #     (self._x0 + self._width, self._y0),
+        #     (self._x0, self._y0)  # ignored as codes[-1] is CLOSEPOLY
+        # ]
+        # codes = [
+        #     Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY
+        # ]
+        # return Path(
+        #     vertices,
+        #     codes,
+        #     **self.pathprops
+        # )
+        return Path.unit_rectangle()
+
+    def _convert_units(self):
+        """Convert bounds of the rectangle."""
+        x0, y0, x1, y1 = self._get_bbox()
+        x0 = self.convert_xunits(x0)
+        y0 = self.convert_yunits(y0)
+        x1 = self.convert_xunits(x1)
+        y1 = self.convert_yunits(y1)
+        return x0, y0, x1, y1
+
+    def get_patch_transform(self):
+        # Note: This cannot be called until after this has been added to
+        # an Axes, otherwise unit conversion will fail. This makes it very
+        # important to call the accessor method and not directly access the
+        # transformation member variable.
+        bbox = self.get_bbox()
+        # return (transforms.BboxTransformTo(bbox)
+        #         + transforms.Affine2D().rotate_deg_around(
+        #             bbox.x0, bbox.y0, self.angle))
+        return transforms.BboxTransformTo(bbox)
+
+    def get_anchor(self,):
+        """Return the anchor point of the block."""
+        return self._anchor
+
+    def get_center(self,):
+        """Return the center point of the block."""
+        xc = self._xa
+        if self._horizontalalignment == 'left':
+            xc += 0.5 * self._width
+        elif self._horizontalalignment == 'right':
+            xc -= 0.5 * self._width
+        yc = self._ya
+        if self._verticalalignment == 'center':
+            yc += 0.5 * self._height
+        elif self._verticalalignment == 'top':
+            yc += self._height
+        return self._xc, self._yc
+
+    def get_x(self):
+        """Return the left coordinate of the block."""
+        return self._x0
+
+    def get_y(self):
+        """Return the bottom coordinate of the block."""
+        if self._y0 is None:
+            _log.warning(
+                "Before accessing vertical coordinates of a block (i.e. *y* or"
+                " *mid_height*) the block need to be distributed vertically."
+            )
+        else:
+            return self._y0
+
+    def get_xy(self):
+        """Return the left and bottom coords of the block as a tuple."""
+        return self._x0, self._y0
+
+    def get_height(self):
+        """Return the height of the block."""
+        return self._height
+
+    def get_width(self):
+        """Return the width of the block."""
+        return self._width
 
     def get_outflows(self):
+        """Return a list of outgoing `._Flows`."""
         return self._outflows
 
-    def add_outflow(self, outflow):
-        self._outflows.append(outflow)
-
-    outflows = property(get_outflows, set_outflows, doc="List of `._Flux`"
-                                                        "objects leaving the"
-                                                        "block.")
-
-    def set_inflows(self, inflows):
-        self._inflows = inflows
-
     def get_inflows(self):
+        """Return a list of incoming `._Flows`."""
         return self._inflows
 
-    def add_inflow(self, inflow):
-        self._inflows.append(inflow)
+    def set_anchor(self, anchor):
+        """Set the anchor for the block."""
+        self._anchor = anchor
+        if anchor is None:
+            self._xa, self._ya = None, None
+        else:
+            self._xa, self._ya = anchor
+        self.stale = True
 
-    inflows = property(get_inflows, set_inflows, doc="List of `._Flux` objects"
-                                                     "entering theblock.")
+    # TODO: inloc and outloc should be set.
+    # def set_y(self, y):
+    #     self._y0 = y
+    #     if self._y0 is not None:
+    #         self._mid_height = self._y0 + 0.5 * self._height
+    #         self.set_inloc()
+    #         self.set_outloc()
+    #     else:
+    #         self._mid_height = None
+    #     self.stale = True
 
     def set_horizontalalignment(self, align):
         _api.check_in_list(['center', 'left', 'right'], align=align)
         self._horizontalalignment = align
-
-    def _get_xy_from_anchor(self, anchor):
-        # set x and y (if possible)
-        if isinstance(anchor, (list, tuple)):
-            xa, ya = anchor
-        else:
-            xa, ya = anchor, None
-        if xa is not None:
-            xa -= 0.5 * self.width
-            if self._horizontalalignment == 'left':
-                xa += 0.5 * self.width
-            elif self._horizontalalignment == 'right':
-                xa -= 0.5 * self.width
-        return xa, ya
-
-    def set_x(self, x):
-        """
-        Set the horizontal position of the block.
-        """
-        self._x = x
         self.stale = True
 
-    def get_x(self):
-        return self._x
-
-    x = property(get_x, set_x, doc="The x coordinate of the block")
-
-    def set_y(self, y):
-        self._y = y
-        if self._y is not None:
-            self._mid_height = self._y + 0.5 * self.height
-            self.set_inloc()
-            self.set_outloc()
-        else:
-            self._mid_height = None
+    def set_verticalalignment(self, align):
+        _api.check_in_list(['center', 'top', 'bottom'], align=align)
+        self._verticalalignment = align
         self.stale = True
 
-    def get_y(self):
-        if self._y is None:
-            _log.warning(
-                "Before accessing vertical coordinates of a block (i.e. *y* or"
-                " *mid_heigth*) the block need to be distributed vertically."
-            )
-        else:
-            return self._y
+    def set_width(self, w):
+        """Set the width of the block."""
+        self._width = w
+        self.stale = True
+
+    def set_height(self, h):
+        """Set the height of the block."""
+        self._height = h
+        self.stale = True
+
+    def set_outflows(self, outflows):
+        self._outflows = outflows
+
+    def set_inflows(self, inflows):
+        self._inflows = inflows
 
     def set_mid_height(self, mid_height):
         self._mid_height = mid_height
         if self._mid_height is not None:
-            self._y = self._mid_height - 0.5 * self.height
+            self._y0 = self._mid_height - 0.5 * self._height
             self.set_inloc()
             self.set_outloc()
         else:
-            self._y = None
+            self._y0 = None
         self.stale = True
 
     def get_mid_height(self):
@@ -206,27 +258,85 @@ class _Block(Patch):
             )
         return self._mid_height
 
+    # TODO: Not sure about this
+    def _set_bbox(self, ):
+        if self._horizontalalignment == 'center':
+            self._x0 = self._xc - 0.5 * self._width
+            self._x1 = self._xc + 0.5 * self._width
+        elif self._horizontalalignment == 'left':
+            self._x0 = self._xc
+            self._x1 = self._xc + self._width
+        elif self._horizontalalignment == 'right':
+            self._x0 = self._xc - self._width
+            self._x1 = self._xc
+        if self._verticalalignment == 'bottom':
+            self._y0 = self._yc
+            self._y1 = self._yc + self._height
+        if self._verticalalignment == 'center':
+            self._y0 = self._yc - 0.5 * self._height
+            self._y1 = self._yc + 0.5 * self._height
+        elif self._verticalalignment == 'top':
+            self._y0 = self._yc - self._height
+            self._y1 = self._yc
+
+    def _get_bbox(self):
+        if self._horizontalalignment == 'center':
+            x0 = self._xc - 0.5 * self._width
+            x1 = self._xc + 0.5 * self._width
+        elif self._horizontalalignment == 'left':
+            x0 = self._xc
+            x1 = self._xc + self._width
+        elif self._horizontalalignment == 'right':
+            x0 = self._xc - self._width
+            x1 = self._xc
+        if self._verticalalignment == 'bottom':
+            y0 = self._yc
+            y1 = self._yc + self._height
+        if self._verticalalignment == 'center':
+            y0 = self._yc - 0.5 * self._height
+            y1 = self._yc + 0.5 * self._height
+        elif self._verticalalignment == 'top':
+            y0 = self._yc - self._height
+            y1 = self._yc
+        return x0, y0, x1, y1
+
+    def get_bbox(self):
+        """Return the `.Bbox`."""
+        x0, y0, x1, y1 = self._convert_units()
+        return transforms.Bbox.from_extents(x0, y0, x1, y1)
+
+    def _get_xy_from_anchor(self, anchor):
+        # set x and y (if possible)
+        if isinstance(anchor, (list, tuple)):
+            xa, ya = anchor
+        else:
+            xa, ya = anchor, None
+        if xa is not None:
+            xa -= 0.5 * self._width
+            if self._horizontalalignment == 'left':
+                xa += 0.5 * self._width
+            elif self._horizontalalignment == 'right':
+                xa -= 0.5 * self._width
+        return xa, ya
+
+    x = property(get_x, set_x, doc="The x coordinate of the block")
+    xy = property(get_xy, set_xy)
+    center = property(get_center, set_center)
+    inflows = property(get_inflows, set_inflows, doc="List of `._Flux` objects"
+                                                     "entering theblock.")
+    outflows = property(get_outflows, set_outflows, doc="List of `._Flux`"
+                                                        "objects leaving the"
+                                                        "block.")
     mid_height = property(
         get_mid_height, set_mid_height,
         doc="y coordinate of the block's center."
     )
 
-    def get_path(self):
-        vertices = [
-            (self.x, self._y),
-            (self.x, self._y + self.height),
-            (self.x + self.width, self._y + self.height),
-            (self.x + self.width, self._y),
-            (self.x, self._y)  # ignored as codes[-1] is CLOSEPOLY
-        ]
-        codes = [
-            Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY
-        ]
-        return Path(
-            vertices,
-            codes,
-            **self.pathprops
-        )
+    def add_outflow(self, outflow):
+        self._outflows.append(outflow)
+
+    def add_inflow(self, inflow):
+        self._inflows.append(inflow)
 
     def get_patch(self, **kwargs):
         # TODO: This method is essentially useless if _Block is a Patch
@@ -390,22 +500,22 @@ class _Block(Patch):
         return anchor_in, top_in
 
     def set_inloc(self,):
-        if self._y is None:
+        if self._y0 is None:
             self.inloc = None
         else:
             self.inloc = {
-                'bottom': (self._x, self._y),  # left, bottom
-                'top': (self._x, self._y + self.height)  # left, top
+                'bottom': (self._x0, self._y0),  # left, bottom
+                'top': (self._x0, self._y0 + self._height)  # left, top
             }
 
     def set_outloc(self,):
-        if self._y is None:
+        if self._y0 is None:
             self.outloc = None
         else:
             self.outloc = {
                 # right, top
-                'top': (self._x + self.width, self._y + self.height),
-                'bottom': (self._x + self.width, self._y)  # right, bottom
+                'top': (self._x0 + self._width, self._y0 + self._height),
+                'bottom': (self._x0 + self._width, self._y0)  # right, bottom
             }
 
 
@@ -482,13 +592,13 @@ class _Flux(object):
         self.target_cluster = target_cluster
         if self.source_cluster is not None:
             if self.relative_flux:
-                self.flux_width = self.flux * self.source_cluster.height
+                self.flux_width = self.flux * self.source_cluster.get_height()
             else:
                 self.flux_width = self.flux
         else:
             if self.target_cluster is not None:
                 if self.relative_flux:
-                    self.flux_width = self.flux * self.target_cluster.height
+                    self.flux_width = self.flux * self.target_cluster.get_height()
                 else:
                     self.flux_width = self.flux
         # append the flux to the clusters
@@ -575,7 +685,7 @@ class _Flux(object):
                     self.target_cluster.in_['bottom'][0] - self.source_cluster.outloc['bottom'][0]
                 )
             else:
-                _dist = 2 * self.source_cluster.width
+                _dist = 2 * self.source_cluster.get_width()
                 _kwargs = _out_kwargs
         else:
             if self.in_loc is not None:
@@ -586,7 +696,7 @@ class _Flux(object):
         # now complete the path points
         if self.anchor_out is not None:
             anchor_out_inner = (
-                self.anchor_out[0] - 0.5 * self.source_cluster.width,
+                self.anchor_out[0] - 0.5 * self.source_cluster.get_width(),
                 self.anchor_out[1]
             )
             dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
@@ -597,7 +707,7 @@ class _Flux(object):
             pass
         if self.top_out is not None:
             top_out_inner = (
-                self.top_out[0] - 0.5 * self.source_cluster.width,
+                self.top_out[0] - 0.5 * self.source_cluster.get_width(),
                 self.top_out[1]
             )
             # 2nd point 2/3 of distance between clusters
@@ -609,7 +719,7 @@ class _Flux(object):
             pass
         if self.anchor_in is not None:
             anchor_in_inner = (
-                self.anchor_in[0] + 0.5 * self.target_cluster.width,
+                self.anchor_in[0] + 0.5 * self.target_cluster.get_width(),
                 self.anchor_in[1]
             )
             dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
@@ -620,7 +730,7 @@ class _Flux(object):
             pass
         if self.top_in is not None:
             top_in_inner = (
-                self.top_in[0] + 0.5 * self.target_cluster.width,
+                self.top_in[0] + 0.5 * self.target_cluster.get_width(),
                 self.top_in[1]
             )
             dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
@@ -709,10 +819,10 @@ class Alluvial:
              Ignore existing y coordinates for a cluster and set the vertical
              position to minimize the vertical displacements of all fluxes.
           'keep':
-            use the cluster's :attr:`~pyalluv.clusters.Cluster.y`. If a
+            use the cluster's :meth:`~pyalluv.clusters.Cluster.get_y`. If a
             cluster has no y position set this raises an exception.
           'complement':
-            use the cluster's :attr:`~pyalluv.clusters.Cluster.y` if
+            use the cluster's :meth:`~pyalluv.clusters.Cluster.get_y` if
             set. Cluster without y position are positioned relative to the other
             clusters by minimizing the vertical displacements of all fluxes.
           'sorted':
@@ -903,8 +1013,8 @@ class Alluvial:
             for x_pos in self.x_positions:
                 for cluster in self.clusters[x_pos]:
                     # in days (same as mdates.date2num)
-                    cluster.width = cluster.width.total_seconds() / 60 / 60 / 24
-                    cluster_widths.append(cluster.width)
+                    cluster.set_width(cluster.width.total_seconds() / 60 / 60 / 24)
+                    cluster_widths.append(cluster.get_width())
                     if cluster.label_margin is not None:
                         _h_margin = cluster.label_margin[0].total_seconds() / 60 / 60 / 24
                         cluster.label_margin = (
@@ -912,19 +1022,19 @@ class Alluvial:
                         )
                     cluster.set_x_pos(mdates.date2num(cluster.x))
 
-        # TODO: set the cluster.width property
+        # TODO: set the cluster.set_width property
         else:
             for x_pos in self.x_positions:
                 for cluster in self.clusters[x_pos]:
-                    cluster_widths.append(cluster.width)
+                    cluster_widths.append(cluster.get_width())
         self.cluster_width = kwargs.get('cluster_width', None)
         self.x_lim = kwargs.get(
             'x_lim',
             (
                 self.x_positions[0] - 2 * min(cluster_widths),
-                # - 2 * self.clusters[self.x_positions[0]][0].width,
+                # - 2 * self.clusters[self.x_positions[0]][0].get_width(),
                 self.x_positions[-1] + 2 * min(cluster_widths),
-                # + 2 * self.clusters[self.x_positions[-1]][0].width,
+                # + 2 * self.clusters[self.x_positions[-1]][0].get_width(),
             )
         )
         self.y_min, self.y_max = None, None
@@ -941,8 +1051,10 @@ class Alluvial:
                         n1 = self.clusters[x_pos][nbr_clusters - i - 1]
                         n2 = self.clusters[x_pos][nbr_clusters - i]
                         if self._swap_clusters(n1, n2, 'forwards'):
-                            n2.y = n1.y
-                            n1.y = n2.y + n2.height + self.cluster_w_spacing
+                            n2.set_y(n1.get_y())
+                            n1.set_y(
+                                n2.get_y() + n2.get_height() + self.cluster_w_spacing
+                            )
                             self.clusters[x_pos][nbr_clusters - i] = n1
                             self.clusters[x_pos][nbr_clusters - i - 1] = n2
         else:
@@ -1214,7 +1326,7 @@ class Alluvial:
         nbr_clusters = len(self.clusters[x_pos])
         if nbr_clusters:
             # sort clusters according to height
-            _clusters = sorted(self.clusters[x_pos], key=lambda x: x.height)
+            _clusters = sorted(self.clusters[x_pos], key=lambda x: x.get_height())
             # sort so to put biggest height in the middle
             self.clusters[x_pos] = _clusters[::-2][::-1] + \
                 _clusters[nbr_clusters % 2::2][::-1]
@@ -1271,8 +1383,10 @@ class Alluvial:
                     n1 = self.clusters[x_pos][i - 1]
                     n2 = self.clusters[x_pos][i]
                     if self._swap_clusters(n1, n2, 'backwards'):
-                        n2.y = n1.y
-                        n1.y = n2.y + n2.height + self.cluster_w_spacing
+                        n2.set_y(n1.get_y())
+                        n1.set_y(
+                            n2.get_y() + n2.get_height() + self.cluster_w_spacing
+                        )
                         self.clusters[x_pos][i - 1] = n2
                         self.clusters[x_pos][i] = n1
             for _ in range(int(0.5 * nbr_clusters)):
@@ -1280,20 +1394,23 @@ class Alluvial:
                     n1 = self.clusters[x_pos][nbr_clusters - i - 1]
                     n2 = self.clusters[x_pos][nbr_clusters - i]
                     if self._swap_clusters(n1, n2, 'backwards'):
-                        n2.y = n1.y
-                        n1.y = n2.y + n2.height + self.cluster_w_spacing
+                        n2.set_y(n1.get_y())
+                        n1.set_y(
+                            n2.get_y() + n2.get_height() + self.cluster_w_spacing
+                        )
                         self.clusters[x_pos][nbr_clusters - i - 1] = n2
                         self.clusters[x_pos][nbr_clusters - i] = n1
 
+            # TODO: bad implementation, avoid duplicated get_y call
             _min_y = min(
-                self.clusters[x_pos], key=lambda x: x.y
-            ).y - 2 * self.cluster_w_spacing
+                self.clusters[x_pos], key=lambda x: x.get_y()
+            ).get_y() - 2 * self.cluster_w_spacing
             _max_y_cluster = max(
                 self.clusters[x_pos],
-                key=lambda x: x.y + x.height
+                key=lambda x: x.get_y() + x.get_height()
             )
-            _max_y = _max_y_cluster.y + \
-                _max_y_cluster.height + 2 * self.cluster_w_spacing
+            _max_y = _max_y_cluster.set_y() + \
+                _max_y_cluster.get_height() + 2 * self.cluster_w_spacing
             self.y_min = min(
                 self.y_min,
                 _min_y
@@ -1367,10 +1484,10 @@ class Alluvial:
                         for i in range(len(weights))]
                 ) / sum(weights)
         # inverse order and check again
-        assert n1.y < n2.y
+        assert n1.get_y() < n2.get_y()
         inv_mid_height = {
-            n1: n2.y + n2.height + self.cluster_w_spacing + 0.5 * n1.height,
-            n2: n1.y + 0.5 * n2.height
+            n1: n2.get_y() + n2.get_height() + self.cluster_w_spacing + 0.5 * n1.get_height(),
+            n2: n1.get_y() + 0.5 * n2.get_height()
         }
         squared_diff_inf = {}
         for cluster in [n1, n2]:
@@ -1476,7 +1593,7 @@ class Alluvial:
             for cluster in self.clusters[x_pos]:
                 # TODO: set color
                 # _cluster_color
-                cluster.y = cluster.y + self.y_offset
+                cluster.set_y(cluster.get_y() + self.y_offset)
                 cluster_patches.append(
                     cluster.get_patch(
                         **cluster_kwargs
@@ -1528,7 +1645,7 @@ class Alluvial:
                         's': cluster.label,
                         'xy': (
                             cluster.x - _h_margin,
-                            cluster.y + _v_margin
+                            cluster.get_y() + _v_margin
                         )
                     }
                     cluster_label.update(kwargs)
@@ -1538,11 +1655,11 @@ class Alluvial:
     def _distribute_column(self, x_pos, cluster_w_spacing):
         displace = 0.0
         for cluster in self.clusters[x_pos]:
-            cluster.y = displace
-            displace += cluster.height + cluster_w_spacing
+            cluster.set_y(displace)
+            displace += cluster.get_height() + cluster_w_spacing
         # now offset to center
-        low = self.clusters[x_pos][0].y
-        high = self.clusters[x_pos][-1].y + self.clusters[x_pos][-1].height
+        low = self.clusters[x_pos][0].get_y()
+        high = self.clusters[x_pos][-1].get_y() + self.clusters[x_pos][-1].get_height()
         cent_offset = low + 0.5 * (high - low)
         # _h_clusters = 0.5 * len(clusters)
         # cent_idx = int(_h_clusters) - 1 \
@@ -1550,7 +1667,7 @@ class Alluvial:
         #     else int(_h_clusters)
         # cent_offest = clusters[cent_idx].mid_height
         for cluster in self.clusters[x_pos]:
-            cluster.y = cluster.y - cent_offset
+            cluster.set_y(cluster.get_y() - cent_offset)
 
     def color_clusters(self, patches, colormap=plt.cm.rainbow):
         r"""

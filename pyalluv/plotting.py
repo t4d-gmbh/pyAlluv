@@ -3,12 +3,15 @@ import numpy as np
 from matplotlib.collections import PatchCollection
 from matplotlib import docstring
 from matplotlib import cbook
-from maptlotlib import _api, transforms
+from matplotlib import transforms
+# from matplotlib import _api
+from matplotlib.collections import Collection
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.path import Path
 from matplotlib.patches import Patch
 import matplotlib.patches as patches
+from matplotlib.legend import Legend
 from datetime import datetime
 from bisect import bisect_left
 
@@ -32,18 +35,20 @@ class _Block(Patch):
     `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
 
     """
-    @docstring.depend_interpd
-    def __init__(self, height, anchor=None, width=1.0, label=None,
+    # TODO uncomment once in mpl
+    # @docstring.dedent_interpd
+    def __init__(self, height, xa=None, ya=None, width=1.0, label=None,
                  horizontalalignment='center', verticalalignment='bottom',
                  label_margin=(0, 0), pathprops=None, **kwargs):
         """
         Parameters
         -----------
         height : float
-          Size of the block.
-        anchor : float or (float, float), optional
-          Set the anchor point. Either only the x coordinate, both
-          x and y, or nothing can be provided.
+          Height of the block.
+        xa: scalar, optional
+          The x coordinate of the block's anchor point.
+        ya: scalar, optional
+          The y coordinate of the block's anchor point.
         width : float,  default: 1.0
           Block width.
         label : str, optional
@@ -55,6 +60,9 @@ class _Block(Patch):
         label_margin: (float, float), default: (0., 0.)
             x and y margin in target coordinates of ``self.get_transform()``
             and added to the *anchor* point to set the point to draw the label.
+        pathprops : None
+          TODO: This might be not needed, it's rather unlikely to be used.
+          Keyword arguments that are passed to `matplotlib.path.Path`.
 
         Other Parameters
         ----------------
@@ -62,46 +70,31 @@ class _Block(Patch):
 
           %(Patch_kwdoc)s
 
-          linewidth: float (default=0.0)
-            Set the width of the line surrounding a cluster.
-        pathprops : None
-          TODO: This might be not needed, it's rather unlikely to be used.
-          Keyword arguments that are passed to `matplotlib.path.Path`.
         """
+        # TODO: this is not necessarily the place to run this:
+        super().__init__(**kwargs)
+
         # TODO: only keep what's in else:
         if isinstance(height, (list, tuple)):
             self._height = len(height)
         else:
             self._height = height
+        self._xa = xa
+        self._ya = ya
         self._width = width
-
+        self._set_horizontalalignment(horizontalalignment)
+        self._set_verticalalignment(verticalalignment)
+        # init the in and out flows:
+        self._outflows = []
+        self._inflows = []
         # self.label = label or ''
         self.set_label(label)
+
         self.label_margin = label_margin
         self.pathprops = pathprops or dict()
-        self.set_horizontalalignment(horizontalalignment)
-        self.set_verticalalignment(verticalalignment)
-        self.set_anchor(anchor)
-        _x, _y = self._get_xy_from_anchor(anchor)
-        self.set_x(_x)
-        self.set_y(_y)  # this also sets *_mid_height*
-        self.set_outloc()
-        self.set_inloc()
+        self.in_margin = {'bottom': 0, 'top': 0}
+        self.out_margin = {'bottom': 0, 'top': 0}
 
-        # init the in and out flows:
-        self.set_outflows([])
-        self.set_inflows([])
-        self.in_margin = {
-            'bottom': 0,
-            'top': 0
-        }
-        self.out_margin = {
-            'bottom': 0,
-            'top': 0
-        }
-
-        # TODO: this is not necessarily the place to run this:
-        super().__init__(**kwargs)
 
     def get_path(self):
         """Return the vertices of the block."""
@@ -124,11 +117,11 @@ class _Block(Patch):
 
     def _convert_units(self):
         """Convert bounds of the rectangle."""
-        x0, y0, x1, y1 = self._get_bbox()
+        x0, y0 = self.get_xy()
         x0 = self.convert_xunits(x0)
         y0 = self.convert_yunits(y0)
-        x1 = self.convert_xunits(x1)
-        y1 = self.convert_yunits(y1)
+        x1 = self.convert_xunits(x0 + self._width)
+        y1 = self.convert_yunits(y0 + self._height)
         return x0, y0, x1, y1
 
     def get_patch_transform(self):
@@ -142,41 +135,13 @@ class _Block(Patch):
         #             bbox.x0, bbox.y0, self.angle))
         return transforms.BboxTransformTo(bbox)
 
-    def get_anchor(self,):
-        """Return the anchor point of the block."""
-        return self._anchor
+    def get_xa(self):
+        """Return the x coordinate of the anchor point."""
+        return self._xa
 
-    def get_center(self,):
-        """Return the center point of the block."""
-        xc = self._xa
-        if self._horizontalalignment == 'left':
-            xc += 0.5 * self._width
-        elif self._horizontalalignment == 'right':
-            xc -= 0.5 * self._width
-        yc = self._ya
-        if self._verticalalignment == 'center':
-            yc += 0.5 * self._height
-        elif self._verticalalignment == 'top':
-            yc += self._height
-        return self._xc, self._yc
-
-    def get_x(self):
-        """Return the left coordinate of the block."""
-        return self._x0
-
-    def get_y(self):
-        """Return the bottom coordinate of the block."""
-        if self._y0 is None:
-            _log.warning(
-                "Before accessing vertical coordinates of a block (i.e. *y* or"
-                " *mid_height*) the block need to be distributed vertically."
-            )
-        else:
-            return self._y0
-
-    def get_xy(self):
-        """Return the left and bottom coords of the block as a tuple."""
-        return self._x0, self._y0
+    def get_ya(self):
+        """Return the y coordinate of the anchor point."""
+        return self._ya
 
     def get_height(self):
         """Return the height of the block."""
@@ -186,6 +151,45 @@ class _Block(Patch):
         """Return the width of the block."""
         return self._width
 
+    def get_anchor(self,):
+        """Return the anchor point of the block."""
+        return self._anchor
+
+    def get_x(self):
+        """Return the left coordinate of the block."""
+        x0 = self._xa
+        if self._horizontalalignment == 'center':
+            x0 -= 0.5 * self._width
+        elif self._horizontalalignment == 'right':
+            x0 -= self._width
+        return x0
+
+    def get_y(self):
+        """Return the bottom coordinate of the block."""
+        y0 = self._ya
+        if self._verticalalignment == 'center':
+            y0 -= 0.5 * self._height
+        elif self._verticalalignment == 'top':
+            y0 -= self._height
+        return y0
+
+    def get_xy(self):
+        """Return the left and bottom coords of the block as a tuple."""
+        return self.get_x(), self.get_y()
+
+    def get_xc(self, ):
+        """Return the y coordinate of the block's center."""
+        return self.get_x() + 0.5 * self._height
+
+    def get_yc(self, ):
+        """Return the y coordinate of the block's center."""
+        return self.get_y() + 0.5 * self._height
+
+    def get_center(self,):
+        """Return the center point of the block."""
+        return (self.get_xc(),
+                self.get_yc())
+
     def get_outflows(self):
         """Return a list of outgoing `._Flows`."""
         return self._outflows
@@ -194,13 +198,32 @@ class _Block(Patch):
         """Return a list of incoming `._Flows`."""
         return self._inflows
 
-    def set_anchor(self, anchor):
-        """Set the anchor for the block."""
-        self._anchor = anchor
-        if anchor is None:
-            self._xa, self._ya = None, None
-        else:
-            self._xa, self._ya = anchor
+    def set_xa(self, xa):
+        """Set the x coordinate of the anchor point."""
+        _update_locs = xa is not None and self._xa != xa
+        self._xa = xa
+        if _update_locs:
+            self._set_inloc()
+            self._set_outloc()
+        self.stale = True
+
+    def set_ya(self, ya):
+        """Set the y coordinate of the anchor point."""
+        _update_locs = ya is not None and self._ya != ya
+        self._ya = ya
+        if _update_locs:
+            self._set_inloc()
+            self._set_outloc()
+        self.stale = True
+
+    def set_width(self, width):
+        """Set the width of the block."""
+        self._width = width
+        self.stale = True
+
+    def set_height(self, height):
+        """Set the height of the block."""
+        self._height = height
         self.stale = True
 
     # TODO: inloc and outloc should be set.
@@ -208,31 +231,39 @@ class _Block(Patch):
     #     self._y0 = y
     #     if self._y0 is not None:
     #         self._mid_height = self._y0 + 0.5 * self._height
-    #         self.set_inloc()
-    #         self.set_outloc()
+    #         self._set_inloc()
+    #         self._set_outloc()
     #     else:
     #         self._mid_height = None
     #     self.stale = True
 
-    def set_horizontalalignment(self, align):
-        _api.check_in_list(['center', 'left', 'right'], align=align)
+    def _set_horizontalalignment(self, align):
+        # TODO: uncomment once in mpl
+        # _api.check_in_list(['center', 'left', 'right'], align=align)
         self._horizontalalignment = align
         self.stale = True
 
-    def set_verticalalignment(self, align):
-        _api.check_in_list(['center', 'top', 'bottom'], align=align)
+    def _set_verticalalignment(self, align):
+        # TODO: uncomment once in mpl
+        # _api.check_in_list(['center', 'top', 'bottom'], align=align)
         self._verticalalignment = align
         self.stale = True
 
-    def set_width(self, w):
-        """Set the width of the block."""
-        self._width = w
-        self.stale = True
+    def set_horizontalalignment(self, align):
+        """Set the horizontal alignment of the anchor point and the block."""
+        _ha = self._horizontalalignment
+        self._set_horizontalalignment(self, align)
+        if _ha != self._horizontalalignment:
+            self._set_inloc()
+            self._set_outloc()
 
-    def set_height(self, h):
-        """Set the height of the block."""
-        self._height = h
-        self.stale = True
+    def set_verticalalignment(self, align):
+        """Set the vertical alignment of the anchor point and the block."""
+        _va = self._verticalalignment
+        self._set_verticalalignment(align)
+        if _va != self._verticalalignment:
+            self._set_inloc()
+            self._set_outloc()
 
     def set_outflows(self, outflows):
         self._outflows = outflows
@@ -240,103 +271,59 @@ class _Block(Patch):
     def set_inflows(self, inflows):
         self._inflows = inflows
 
-    def set_mid_height(self, mid_height):
-        self._mid_height = mid_height
-        if self._mid_height is not None:
-            self._y0 = self._mid_height - 0.5 * self._height
-            self.set_inloc()
-            self.set_outloc()
-        else:
-            self._y0 = None
-        self.stale = True
-
-    def get_mid_height(self):
-        if self._mid_height is None:
-            _log.warning(
-                "Before accessing vertical coordinates of a block (i.e. *y* or"
-                " *mid_heigth*) the block need to be distributed vertically."
-            )
-        return self._mid_height
-
-    # TODO: Not sure about this
-    def _set_bbox(self, ):
-        if self._horizontalalignment == 'center':
-            self._x0 = self._xc - 0.5 * self._width
-            self._x1 = self._xc + 0.5 * self._width
-        elif self._horizontalalignment == 'left':
-            self._x0 = self._xc
-            self._x1 = self._xc + self._width
-        elif self._horizontalalignment == 'right':
-            self._x0 = self._xc - self._width
-            self._x1 = self._xc
-        if self._verticalalignment == 'bottom':
-            self._y0 = self._yc
-            self._y1 = self._yc + self._height
-        if self._verticalalignment == 'center':
-            self._y0 = self._yc - 0.5 * self._height
-            self._y1 = self._yc + 0.5 * self._height
-        elif self._verticalalignment == 'top':
-            self._y0 = self._yc - self._height
-            self._y1 = self._yc
-
-    def _get_bbox(self):
-        if self._horizontalalignment == 'center':
-            x0 = self._xc - 0.5 * self._width
-            x1 = self._xc + 0.5 * self._width
-        elif self._horizontalalignment == 'left':
-            x0 = self._xc
-            x1 = self._xc + self._width
-        elif self._horizontalalignment == 'right':
-            x0 = self._xc - self._width
-            x1 = self._xc
-        if self._verticalalignment == 'bottom':
-            y0 = self._yc
-            y1 = self._yc + self._height
-        if self._verticalalignment == 'center':
-            y0 = self._yc - 0.5 * self._height
-            y1 = self._yc + 0.5 * self._height
-        elif self._verticalalignment == 'top':
-            y0 = self._yc - self._height
-            y1 = self._yc
-        return x0, y0, x1, y1
-
     def get_bbox(self):
         """Return the `.Bbox`."""
         x0, y0, x1, y1 = self._convert_units()
         return transforms.Bbox.from_extents(x0, y0, x1, y1)
 
-    def _get_xy_from_anchor(self, anchor):
-        # set x and y (if possible)
-        if isinstance(anchor, (list, tuple)):
-            xa, ya = anchor
-        else:
-            xa, ya = anchor, None
-        if xa is not None:
-            xa -= 0.5 * self._width
-            if self._horizontalalignment == 'left':
-                xa += 0.5 * self._width
-            elif self._horizontalalignment == 'right':
-                xa -= 0.5 * self._width
-        return xa, ya
-
-    x = property(get_x, set_x, doc="The x coordinate of the block")
-    xy = property(get_xy, set_xy)
-    center = property(get_center, set_center)
-    inflows = property(get_inflows, set_inflows, doc="List of `._Flux` objects"
+    xa = property(get_xa, set_xa)
+    ya = property(get_ya, set_ya)
+    inflows = property(get_inflows, set_inflows, doc="List of `._Flow` objects"
                                                      "entering theblock.")
-    outflows = property(get_outflows, set_outflows, doc="List of `._Flux`"
+    outflows = property(get_outflows, set_outflows, doc="List of `._Flow`"
                                                         "objects leaving the"
                                                         "block.")
-    mid_height = property(
-        get_mid_height, set_mid_height,
-        doc="y coordinate of the block's center."
-    )
 
     def add_outflow(self, outflow):
         self._outflows.append(outflow)
 
     def add_inflow(self, inflow):
         self._inflows.append(inflow)
+
+    # def set_mid_height(self, mid_height):
+    #     self._mid_height = mid_height
+    #     if self._mid_height is not None:
+    #         self._y0 = self._mid_height - 0.5 * self._height
+    #         self._set_inloc()
+    #         self._set_outloc()
+    #     else:
+    #         self._y0 = None
+    #     self.stale = True
+
+    # def get_mid_height(self):
+    #     if self._mid_height is None:
+    #         _log.warning(
+    #             "Before accessing vertical coordinates of a block (i.e. *y* or"
+    #             " *mid_heigth*) the block need to be distributed vertically."
+    #         )
+    #     return self._mid_height
+    # def _get_xy_from_anchor(self, anchor):
+    #     # set x and y (if possible)
+    #     if isinstance(anchor, (list, tuple)):
+    #         xa, ya = anchor
+    #     else:
+    #         xa, ya = anchor, None
+    #     if xa is not None:
+    #         xa -= 0.5 * self._width
+    #         if self._horizontalalignment == 'left':
+    #             xa += 0.5 * self._width
+    #         elif self._horizontalalignment == 'right':
+    #             xa -= 0.5 * self._width
+    #     return xa, ya
+    # mid_height = property(
+    #     get_mid_height, set_mid_height,
+    #     doc="y coordinate of the block's center."
+    # )
 
     def get_patch(self, **kwargs):
         # TODO: This method is essentially useless if _Block is a Patch
@@ -349,8 +336,8 @@ class _Block(Patch):
         _kwargs = dict(kwargs)
         _kwargs.update(self.patch_kwargs)
 
-        self.set_outloc()
-        self.set_inloc()
+        self._set_outloc()
+        self._set_inloc()
 
         # self.set_path(self.create_path())
         # return patches.PathPatch(
@@ -360,14 +347,14 @@ class _Block(Patch):
         return self
 
     def set_loc_out_fluxes(self,):
+        yc = self.get_yc()
         for out_flux in self._outflows:
             in_loc = None
             out_loc = None
             if out_flux.target_cluster is not None:
-                if self.mid_height > out_flux.target_cluster.mid_height:
+                if yc > out_flux.target_cluster.get_yc():
                     # draw to top
-                    if self.mid_height >= \
-                            out_flux.target_cluster.inloc['top'][1]:
+                    if yc >= out_flux.target_cluster.inloc['top'][1]:
                         # draw from bottom to in top
                         out_loc = 'bottom'
                         in_loc = 'top'
@@ -377,8 +364,7 @@ class _Block(Patch):
                         in_loc = 'top'
                 else:
                     # draw to bottom
-                    if self.mid_height <= \
-                            out_flux.target_cluster.inloc['bottom'][1]:
+                    if yc <= out_flux.target_cluster.inloc['bottom'][1]:
                         # draw from top to bottom
                         out_loc = 'top'
                         in_loc = 'bottom'
@@ -405,8 +391,9 @@ class _Block(Patch):
         if _top_fluxes:
             sorted_top_idx, _fluxes_top = zip(*sorted(
                 _top_fluxes,
-                key=lambda x: x[1].target_cluster.mid_height
+                key=lambda x: x[1].target_cluster.get_yc()
                 if x[1].target_cluster
+                # TODO: this should not simply be -10000
                 else -10000,
                 reverse=True
             ))
@@ -415,8 +402,9 @@ class _Block(Patch):
         if _bottom_fluxes:
             sorted_bottom_idx, _fluxes_bottom = zip(*sorted(
                 _bottom_fluxes,
-                key=lambda x: x[1].target_cluster.mid_height
+                key=lambda x: x[1].target_cluster.get_yc()
                 if x[1].target_cluster
+                # TODO: this should not simply be -10000
                 else -10000,
                 reverse=False
             ))
@@ -439,8 +427,9 @@ class _Block(Patch):
         if _top_fluxes:
             sorted_top_idx, _fluxes_top = zip(*sorted(
                 _top_fluxes,
-                key=lambda x: x[1].source_cluster.mid_height
+                key=lambda x: x[1].source_cluster.get_yc()
                 if x[1].source_cluster
+                # TODO: this should not simply be -10000
                 else -10000,
                 reverse=True
             ))
@@ -449,8 +438,9 @@ class _Block(Patch):
         if _bottom_fluxes:
             sorted_bottom_idx, _fluxes_bottom = zip(*sorted(
                 _bottom_fluxes,
-                key=lambda x: x[1].source_cluster.mid_height
+                key=lambda x: x[1].source_cluster.get_yc()
                 if x[1].source_cluster
+                # TODO: this should not simply be -10000
                 else -10000,
                 reverse=False
             ))
@@ -499,27 +489,23 @@ class _Block(Patch):
         self.in_margin[in_loc] += flux_width
         return anchor_in, top_in
 
-    def set_inloc(self,):
-        if self._y0 is None:
-            self.inloc = None
-        else:
-            self.inloc = {
-                'bottom': (self._x0, self._y0),  # left, bottom
-                'top': (self._x0, self._y0 + self._height)  # left, top
-            }
+    def _set_inloc(self,):
+        x0, y0 = self.get_xy()
+        self.inloc = {
+            'bottom': (x0, y0),  # left, bottom
+            'top': (x0, y0 + self._height)  # left, top
+        }
 
-    def set_outloc(self,):
-        if self._y0 is None:
-            self.outloc = None
-        else:
-            self.outloc = {
-                # right, top
-                'top': (self._x0 + self._width, self._y0 + self._height),
-                'bottom': (self._x0 + self._width, self._y0)  # right, bottom
-            }
+    def _set_outloc(self,):
+        x0, y0 = self.get_xy()
+        self.outloc = {
+            # right, top
+            'top': (x0 + self._width, y0 + self._height),
+            'bottom': (x0 + self._width, y0)  # right, bottom
+        }
 
 
-class _Flux(object):
+class _Flow(object):
     r"""
 
     Parameters
@@ -762,6 +748,60 @@ class _Flux(object):
         return flux_patch
 
 
+class SubDiagram(Collection):
+    """
+    A collection of Blocks and Flows.
+
+    """
+    # def __init__(self, patches, match_original=False, **kwargs):
+    def __init__(self, blocks, flows, match_original=False, label=None,
+                 label_margin=(0, 0), **kwargs):
+        """
+        Parameters
+        ----------
+        blocks : sequence
+            A sequence of _Block objects.
+        blocks : sequence
+            A sequence of _Block objects.
+        match_original : bool, (default=False)
+            If True, use the colors and linewidths of the original
+            patches.  If False, new colors may be assigned by
+            providing the standard collection arguments, facecolor,
+            edgecolor, linewidths, norm or cmap.
+        label : str, optional
+            Label of the diagram.
+        """
+
+        self._blocks = list(blocks)
+        self._flows = list(flows)
+        if match_original:
+            def determine_facecolor(patch):
+                if patch.get_fill():
+                    return patch.get_facecolor()
+                return [0, 0, 0, 0]
+
+            for patches in [blocks, flows]:
+                kwargs['facecolors'] = [determine_facecolor(p) for p in patches]
+                kwargs['edgecolors'] = [p.get_edgecolor() for p in patches]
+                kwargs['linewidths'] = [p.get_linewidth() for p in patches]
+                kwargs['linestyles'] = [p.get_linestyle() for p in patches]
+                kwargs['antialiaseds'] = [p.get_antialiased() for p in patches]
+
+        # self.set_paths(patches)
+        super().__init__(**kwargs)
+
+    def set_paths(self, patches):
+        paths = [p.get_transform().transform_path(p.get_path())
+                 for p in patches]
+        self._paths = paths
+
+    def add_block(self, block):
+        self._blocks.appen(block)
+
+    def add_flow(self, block):
+        self._blocks.appen(block)
+
+
 class Alluvial:
     """
     Alluvial diagram.
@@ -771,9 +811,9 @@ class Alluvial:
         structure over time.
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
-    @docstring.dedent_interpd
+    # @docstring.dedent_interpd
     def __init__(
-        self, clusters, ax=None, y_pos='overwrite', cluster_w_spacing=1,
+        self, x=None, ax=None, y_pos='overwrite', cluster_w_spacing=1,
         blockprops=None, flux_kwargs={}, label_kwargs={},
         **kwargs
     ):
@@ -785,6 +825,8 @@ class Alluvial:
         ===========
 
         clusters: dict[str, dict], dict[float, list] or list[list]
+          .. warning::
+            to remove
           You have 2 options to create an Alluvial diagram::
 
           raw data: dict[str, dict]
@@ -809,6 +851,16 @@ class Alluvial:
             :obj:`.Cluster` (*value*) for a horizontal position (*key*), e.g.
             ``{1.0: [c11, c12, ...], 2.0: [c21, c22, ...], ...}``.
 
+        x : array-like, optional
+          The x coordinates for the columns in the Alluvial diagram.
+
+          They will be used as default coordinates whenever a sub-diagram is
+          added that does not specify it's own x coordinates.
+
+          If not given, the x coordinates will be inferred as soon as the first
+          diagram is added and default to the range of the number of columns in
+          the diagram.
+
         ax: `~.axes.Axes`
           Axes onto which the Alluvial diagram should be drawn.
           If *ax* is not provided a new Axes instance will be created.
@@ -816,19 +868,19 @@ class Alluvial:
           **options:** ``'overwrite'``, ``'keep'``, ``'complement'``, ``'sorted'``
 
           'overwrite':
-             Ignore existing y coordinates for a cluster and set the vertical
+             Ignore existing y coordinates for a block and set the vertical
              position to minimize the vertical displacements of all fluxes.
           'keep':
-            use the cluster's :meth:`~pyalluv.clusters.Cluster.get_y`. If a
-            cluster has no y position set this raises an exception.
+            use the block's :meth:`_Block.get_y`. If a block has no y
+            coordinate set this raises an exception.
           'complement':
-            use the cluster's :meth:`~pyalluv.clusters.Cluster.get_y` if
-            set. Cluster without y position are positioned relative to the other
-            clusters by minimizing the vertical displacements of all fluxes.
+            use the block's :meth:`_Block.get_y` if
+            set. Blocks without y position are positioned relative to the other
+            blocks by minimizing the vertical displacements of all fluxes.
           'sorted':
             NOT IMPLEMENTED YET
         cluster_w_spacing: float, int (default=1)
-          Vertical spacing between clusters
+          Vertical spacing between blocks.
         blockprops : dict, optional
           The properties used to draw the blocks. *blockprops* accepts the
           following specific keyword arguments:
@@ -868,28 +920,28 @@ class Alluvial:
           -----
 
             Passing a string to `facecolor` and/or `edgecolor` allows to color
-            fluxes relative to the color of their source or target clusters.
+            fluxes relative to the color of their source or target blocks.
 
             ``'source_cluster'`` or ``'target_cluster'``:
-              will set the facecolor equal to the color of the respective cluster.
+              will set the facecolor equal to the color of the respective block.
 
               ``'cluster'`` *and* ``'source_cluster'`` *are equivalent.*
 
             ``'<cluster>_reside'`` or ``'<cluster>_migration'``:
-              set the color based on whether source and target cluster have the
+              set the color based on whether source and target block have the
               same color or not. ``'<cluster>'`` should be either
               ``'source_cluster'`` or ``'target_cluster'`` and determines the
-              cluster from which the color is taken.
+              block from which the color is taken.
 
               **Examples:**
 
               ``facecolor='cluster_reside'``
-                set `facecolor` to the color of the source cluster if both source
-                and target cluster are of the same color.
+                set `facecolor` to the color of the source block if both source
+                and target block are of the same color.
 
               ``edgecolor='cluster_migration'``
-                set `edgecolor` to the color of the source cluster if source and
-                target cluster are of different colors.
+                set `edgecolor` to the color of the source block if source and
+                target block are of different colors.
 
         **kwargs optional parameter:
             x_lim: tuple
@@ -897,9 +949,9 @@ class Alluvial:
             y_lim: tuple
               the vertical limit values for the :class:`~matplotlib.axes.Axes`.
             set_x_pos: bool
-              if clusters is a dict then the key is set for all clusters
+              if `clusters` is a dict then the key is set for all blocks
             cluster_width: float
-              (NOT IMPLEMENTED) overwrites width of all clusters
+              (NOT IMPLEMENTED) overwrites width of all blocks
             format_xaxis: bool (default=True)
               If set to `True` the axes is formatted according to the data
               provided. For now, this is only relevant if the horizontal positions
@@ -916,13 +968,13 @@ class Alluvial:
               whether or not to draw these axis.
             y_fix: dict
               with x_pos as keys and a list of tuples
-              (cluster labels) as values. The position of clusters (tuples)
+              (block labels) as values. The position of blocks (tuples)
               are swapped.
             redistribute_vertically: int (default=4)
-              how often the vertical pairwise swapping of clusters at a given time
+              how often the vertical pairwise swapping of blocks at a given time
               point should be performed.
             y_offset: float
-              offsets the vertical position of each cluster by this amount.
+              offsets the vertical position of each block by this amount.
 
               .. note::
 
@@ -935,7 +987,7 @@ class Alluvial:
         ===========
 
         clusters: dict
-          Holds for each vertical position a list of :obj:`.Cluster` objects.
+          Holds for each vertical position a list of :obj:`._Block` objects.
         """
         self._diagrams = []
         self._extouts = []
@@ -963,159 +1015,161 @@ class Alluvial:
             self.add(**kwargs)
             self.finish()
 
-        # if clusters are given in a list of lists (each list is a x position)
-        self._set_x_pos = kwargs.get('set_x_pos', True)
-        self._redistribute_vertically = kwargs.get(
-            'redistribute_vertically',
-            4
-        )
-        self.with_cluster_labels = kwargs.get('with_cluster_labels', True)
-        self.format_xaxis = kwargs.get('format_xaxis', True)
-        self._x_axis_offset = kwargs.get('x_axis_offset', 0.0)
-        self._fill_figure = kwargs.get('fill_figure', False)
-        self._invisible_y = kwargs.get('invisible_y', True)
-        self._invisible_x = kwargs.get('invisible_x', False)
-        self.y_offset = kwargs.get('y_offset', 0)
-        self.y_fix = kwargs.get('y_fix', None)
-        if isinstance(clusters, dict):
-            self.clusters = clusters
-        else:
-            self.clusters = {}
-            for cluster in clusters:
-                try:
-                    self.clusters[cluster.x].append(cluster)
-                except KeyError:
-                    self.clusters[cluster.x] = [cluster]
-        self.x_positions = sorted(self.clusters.keys())
+        # # if blocks are given in a list of lists (each list is a x position)
+        # self._set_x_pos = kwargs.get('set_x_pos', True)
+        # self._redistribute_vertically = kwargs.get(
+        #     'redistribute_vertically',
+        #     4
+        # )
+        # self.with_cluster_labels = kwargs.get('with_cluster_labels', True)
+        # self.format_xaxis = kwargs.get('format_xaxis', True)
+        # self._x_axis_offset = kwargs.get('x_axis_offset', 0.0)
+        # self._fill_figure = kwargs.get('fill_figure', False)
+        # self._invisible_y = kwargs.get('invisible_y', True)
+        # self._invisible_x = kwargs.get('invisible_x', False)
+        # self.y_offset = kwargs.get('y_offset', 0)
+        # self.y_fix = kwargs.get('y_fix', None)
+
+        # # this goes to the add method anyways
+        # if isinstance(clusters, dict):
+        #     self.clusters = clusters
+        # else:
+        #     self.clusters = {}
+        #     for cluster in clusters:
+        #         try:
+        #             self.clusters[cluster.x].append(cluster)
+        #         except KeyError:
+        #             self.clusters[cluster.x] = [cluster]
+        # self.x_positions = sorted(self.clusters.keys())
         # set the x positions correctly for the clusters
-        if self._set_x_pos:
-            for x_pos in self.x_positions:
-                for cluster in self.clusters[x_pos]:
-                    cluster = cluster.set_x_pos(x_pos)
-        self._x_dates = False
-        _minor_tick = 'months'
-        cluster_widths = []
-        if isinstance(self.x_positions[0], datetime):
-            # assign date locator/formatter to the x-axis to get proper labels
-            if self.format_xaxis:
-                locator = mdates.AutoDateLocator(minticks=3)
-                formatter = mdates.AutoDateFormatter(locator)
-                self.ax.xaxis.set_major_locator(locator)
-                self.ax.xaxis.set_major_formatter(formatter)
-            self._x_dates = True
-            if (self.x_positions[-1] - self.x_positions[0]).days < 2 * 30:
-                _minor_tick = 'weeks'
-            self.clusters = {
-                mdates.date2num(x_pos): self.clusters[x_pos]
-                for x_pos in self.x_positions
-            }
-            self.x_positions = sorted(self.clusters.keys())
-            for x_pos in self.x_positions:
-                for cluster in self.clusters[x_pos]:
-                    # in days (same as mdates.date2num)
-                    cluster.set_width(cluster.width.total_seconds() / 60 / 60 / 24)
-                    cluster_widths.append(cluster.get_width())
-                    if cluster.label_margin is not None:
-                        _h_margin = cluster.label_margin[0].total_seconds() / 60 / 60 / 24
-                        cluster.label_margin = (
-                            _h_margin, cluster.label_margin[1]
-                        )
-                    cluster.set_x_pos(mdates.date2num(cluster.x))
+        # if self._set_x_pos:
+        #     for x_pos in self.x_positions:
+        #         for cluster in self.clusters[x_pos]:
+        #             cluster = cluster.set_x_pos(x_pos)
+        # self._x_dates = False
+        # _minor_tick = 'months'
+        # cluster_widths = []
+        # if isinstance(self.x_positions[0], datetime):
+        #     # assign date locator/formatter to the x-axis to get proper labels
+        #     if self.format_xaxis:
+        #         locator = mdates.AutoDateLocator(minticks=3)
+        #         formatter = mdates.AutoDateFormatter(locator)
+        #         self.ax.xaxis.set_major_locator(locator)
+        #         self.ax.xaxis.set_major_formatter(formatter)
+        #     self._x_dates = True
+        #     if (self.x_positions[-1] - self.x_positions[0]).days < 2 * 30:
+        #         _minor_tick = 'weeks'
+        #     self.clusters = {
+        #         mdates.date2num(x_pos): self.clusters[x_pos]
+        #         for x_pos in self.x_positions
+        #     }
+        #     self.x_positions = sorted(self.clusters.keys())
+        #     for x_pos in self.x_positions:
+        #         for cluster in self.clusters[x_pos]:
+        #             # in days (same as mdates.date2num)
+        #             cluster.set_width(cluster.width.total_seconds() / 60 / 60 / 24)
+        #             cluster_widths.append(cluster.get_width())
+        #             if cluster.label_margin is not None:
+        #                 _h_margin = cluster.label_margin[0].total_seconds() / 60 / 60 / 24
+        #                 cluster.label_margin = (
+        #                     _h_margin, cluster.label_margin[1]
+        #                 )
+        #             cluster.set_x_pos(mdates.date2num(cluster.x))
 
-        # TODO: set the cluster.set_width property
-        else:
-            for x_pos in self.x_positions:
-                for cluster in self.clusters[x_pos]:
-                    cluster_widths.append(cluster.get_width())
-        self.cluster_width = kwargs.get('cluster_width', None)
-        self.x_lim = kwargs.get(
-            'x_lim',
-            (
-                self.x_positions[0] - 2 * min(cluster_widths),
-                # - 2 * self.clusters[self.x_positions[0]][0].get_width(),
-                self.x_positions[-1] + 2 * min(cluster_widths),
-                # + 2 * self.clusters[self.x_positions[-1]][0].get_width(),
-            )
-        )
-        self.y_min, self.y_max = None, None
-        if self.y_pos == 'overwrite':
-            # reset the vertical positions for each row
-            for x_pos in self.x_positions:
-                self.distribute_clusters(x_pos)
-            for x_pos in self.x_positions:
-                self._move_new_clusters(x_pos)
-            for x_pos in self.x_positions:
-                nbr_clusters = len(self.clusters[x_pos])
-                for _ in range(nbr_clusters):
-                    for i in range(1, nbr_clusters):
-                        n1 = self.clusters[x_pos][nbr_clusters - i - 1]
-                        n2 = self.clusters[x_pos][nbr_clusters - i]
-                        if self._swap_clusters(n1, n2, 'forwards'):
-                            n2.set_y(n1.get_y())
-                            n1.set_y(
-                                n2.get_y() + n2.get_height() + self.cluster_w_spacing
-                            )
-                            self.clusters[x_pos][nbr_clusters - i] = n1
-                            self.clusters[x_pos][nbr_clusters - i - 1] = n2
-        else:
-            # TODO: keep and complement
-            pass
-        if isinstance(self.y_fix, dict):
-            # TODO: allow to directly get the index given the cluster label
-            for x_pos in self.y_fix:
-                for st in self.y_fix[x_pos]:
-                    n1_idx, n2_idx = (
-                        i for i, l in enumerate(
-                            map(lambda x: x.label, self.clusters[x_pos])
-                        )
-                        if l in st
-                    )
-                    self.clusters[x_pos][n1_idx], self.clusters[x_pos][n2_idx] = self.clusters[
-                        x_pos
-                    ][n2_idx], self.clusters[x_pos][n1_idx]
-                    self._distribute_column(x_pos, self.cluster_w_spacing)
+        # # TODO: set the cluster.set_width property
+        # else:
+        #     for x_pos in self.x_positions:
+        #         for cluster in self.clusters[x_pos]:
+        #             cluster_widths.append(cluster.get_width())
+        # self.cluster_width = kwargs.get('cluster_width', None)
+        # self.x_lim = kwargs.get(
+        #     'x_lim',
+        #     (
+        #         self.x_positions[0] - 2 * min(cluster_widths),
+        #         # - 2 * self.clusters[self.x_positions[0]][0].get_width(),
+        #         self.x_positions[-1] + 2 * min(cluster_widths),
+        #         # + 2 * self.clusters[self.x_positions[-1]][0].get_width(),
+        #     )
+        # )
+        # self.y_min, self.y_max = None, None
+        # if self.y_pos == 'overwrite':
+        #     # reset the vertical positions for each row
+        #     for x_pos in self.x_positions:
+        #         self.distribute_clusters(x_pos)
+        #     for x_pos in self.x_positions:
+        #         self._move_new_clusters(x_pos)
+        #     for x_pos in self.x_positions:
+        #         nbr_clusters = len(self.clusters[x_pos])
+        #         for _ in range(nbr_clusters):
+        #             for i in range(1, nbr_clusters):
+        #                 n1 = self.clusters[x_pos][nbr_clusters - i - 1]
+        #                 n2 = self.clusters[x_pos][nbr_clusters - i]
+        #                 if self._swap_clusters(n1, n2, 'forwards'):
+        #                     n2.set_y(n1.get_y())
+        #                     n1.set_y(
+        #                         n2.get_y() + n2.get_height() + self.cluster_w_spacing
+        #                     )
+        #                     self.clusters[x_pos][nbr_clusters - i] = n1
+        #                     self.clusters[x_pos][nbr_clusters - i - 1] = n2
+        # else:
+        #     # TODO: keep and complement
+        #     pass
+        # if isinstance(self.y_fix, dict):
+        #     # TODO: allow to directly get the index given the cluster label
+        #     for x_pos in self.y_fix:
+        #         for st in self.y_fix[x_pos]:
+        #             n1_idx, n2_idx = (
+        #                 i for i, l in enumerate(
+        #                     map(lambda x: x.label, self.clusters[x_pos])
+        #                 )
+        #                 if l in st
+        #             )
+        #             self.clusters[x_pos][n1_idx], self.clusters[x_pos][n2_idx] = self.clusters[
+        #                 x_pos
+        #             ][n2_idx], self.clusters[x_pos][n1_idx]
+        #             self._distribute_column(x_pos, self.cluster_w_spacing)
 
-        # positions are set
-        self.y_lim = kwargs.get('y_lim', (self.y_min, self.y_max))
-        # set the colors
-        # TODO
+        # # positions are set
+        # self.y_lim = kwargs.get('y_lim', (self.y_min, self.y_max))
+        # # set the colors
+        # # TODO
 
-        # now draw
-        patch_collection = self.get_patchcollection(
-            cluster_kwargs=self._cluster_kwargs,
-            flux_kwargs=self._flux_kwargs
-        )
-        self.ax.add_collection(patch_collection)
-        if self.with_cluster_labels:
-            label_collection = self.get_labelcollection(**self._label_kwargs)
-            if label_collection:
-                for label in label_collection:
-                    self.ax.annotate(**label)
-        self.ax.set_xlim(
-            *self.x_lim
-        )
-        self.ax.set_ylim(
-            *self.y_lim
-        )
-        if self._fill_figure:
-            self.ax.set_position(
-                [
-                    0.0,
-                    self._x_axis_offset,
-                    0.99,
-                    1.0 - self._x_axis_offset
-                ]
-            )
-        if self._invisible_y:
-            self.ax.get_yaxis().set_visible(False)
-        if self._invisible_x:
-            self.ax.get_xaxis().set_visible(False)
-        self.ax.spines['right'].set_color('none')
-        self.ax.spines['left'].set_color('none')
-        self.ax.spines['top'].set_color('none')
-        self.ax.spines['bottom'].set_color('none')
-        if isinstance(self.x_positions[0], datetime) and self.format_xaxis:
-            self.set_dates_xaxis(_minor_tick)
+        # # now draw
+        # patch_collection = self.get_patchcollection(
+        #     cluster_kwargs=self._cluster_kwargs,
+        #     flux_kwargs=self._flux_kwargs
+        # )
+        # self.ax.add_collection(patch_collection)
+        # if self.with_cluster_labels:
+        #     label_collection = self.get_labelcollection(**self._label_kwargs)
+        #     if label_collection:
+        #         for label in label_collection:
+        #             self.ax.annotate(**label)
+        # self.ax.set_xlim(
+        #     *self.x_lim
+        # )
+        # self.ax.set_ylim(
+        #     *self.y_lim
+        # )
+        # if self._fill_figure:
+        #     self.ax.set_position(
+        #         [
+        #             0.0,
+        #             self._x_axis_offset,
+        #             0.99,
+        #             1.0 - self._x_axis_offset
+        #         ]
+        #     )
+        # if self._invisible_y:
+        #     self.ax.get_yaxis().set_visible(False)
+        # if self._invisible_x:
+        #     self.ax.get_xaxis().set_visible(False)
+        # self.ax.spines['right'].set_color('none')
+        # self.ax.spines['left'].set_color('none')
+        # self.ax.spines['top'].set_color('none')
+        # self.ax.spines['bottom'].set_color('none')
+        # if isinstance(self.x_positions[0], datetime) and self.format_xaxis:
+        #     self.set_dates_xaxis(_minor_tick)
 
     @property
     def clusters(self):
@@ -1149,7 +1203,7 @@ class Alluvial:
         finally:
             return data
 
-    def add(self, flows, ext=None, extout=None, label=None, yoff=0,
+    def add(self, flows, ext=None, extout=None, x=None, label=None, yoff=0,
             fractionflow=False, **kwargs):
         r"""
         Add an Alluvial diagram with a vertical offset.
@@ -1187,6 +1241,19 @@ class Alluvial:
             diagram.
 
             If a list is provided the entries are mapped to diagrams by index.
+        x : array-like, optional
+            The x coordinates of the columns.
+
+            When provided, the added diagram ignores the x coordinates that might
+            have been provided on initiation of the `.Alluvial` instance or any
+            previous :meth:`.Alluvial.add` call.
+
+            If the `.Alluvial` instance had no values set for the x coordinates
+            *x* will be set to the new default.
+
+            If not provided and no x coordinates have been set previously, then
+            the x coordinates will default to the range defined by the number
+            of columns in the diagram to add.
         label : string, optional
             The label of the diagram to add.
         fractionflow : bool, default: False
@@ -1260,10 +1327,13 @@ class Alluvial:
         # create the columns
         _columns = [_cinit]
         for flow, e in zip(flows, ext[1:]):
-            if not fractionflow:
-                _col = flow.sum(1) + e
-            else:
-                _col = flow.dot(_columns[-1]) + e
+            _col = e
+            if flow:
+                if fractionflow:
+                    _flow = flow.dot(_columns[-1])
+                else:
+                    _flow = flow.sum(1)
+                _col = _flow + e
             _columns.append(_col)
 
         if extout is not None:
@@ -1276,41 +1346,45 @@ class Alluvial:
         self._extouts.append(extout)
         self._diagc += 1
 
-        # Create the sequence of clusterings
-        time_points = [0, 4, 9, 14, 18.2]
-        # Define the cluster sizes per snapshot
-        # at each time point {cluster_id: cluster_size})
-        cluster_sizes = [{0: 3}, {0: 5}, {0: 3, 1: 2}, {0: 5}, {0: 4}]
-        # Define the membership fluxes between neighbouring clusterings
-        between_fluxes = [
-            {(0, 0): 3},  # key: (from cluster, to cluster), value: size
-            {(0, 0): 3, (0, 1): 2},
-            {(0, 0): 3, (1, 0): 2},
-            {(0, 0): 4}
-        ]
-        # set the colors
-        cluster_color = {0: "C1", 1: "C2"}
-        # create a dictionary with the time points as keys and a list of clusters
-        # as values
-        clustering_sequence = {}
-        for tp, clustering in enumerate(cluster_sizes):
-            clustering_sequence[time_points[tp]] = [
-                _Cluster(
-                    height=clustering[cid],
-                    label="{0}".format(cid),
-                    facecolor=cluster_color[cid],
-                ) for cid in clustering
-            ]
-        # now create the fluxes between the clusters
-        for tidx, tp in enumerate(time_points[1:]):
-            fluxes = between_fluxes[tidx]
-            for from_csid, to_csid in fluxes:
-                _Flux(
-                    flux=fluxes[(from_csid, to_csid)],
-                    source_cluster=clustering_sequence[time_points[tidx]][from_csid],
-                    target_cluster=clustering_sequence[tp][to_csid],
-                    facecolor='source_cluster'
-                )
+        # # Create the sequence of clusterings
+        # time_points = [0, 4, 9, 14, 18.2]
+        # # Define the cluster sizes per snapshot
+        # # at each time point {cluster_id: cluster_size})
+        # cluster_sizes = [{0: 3}, {0: 5}, {0: 3, 1: 2}, {0: 5}, {0: 4}]
+        # # Define the membership fluxes between neighbouring clusterings
+        # between_fluxes = [
+        #     {(0, 0): 3},  # key: (from cluster, to cluster), value: size
+        #     {(0, 0): 3, (0, 1): 2},
+        #     {(0, 0): 3, (1, 0): 2},
+        #     {(0, 0): 4}
+        # ]
+        # # set the colors
+        # cluster_color = {0: "C1", 1: "C2"}
+        # # create a dictionary with the time points as keys and a list of clusters
+        # # as values
+        # clustering_sequence = {}
+        # for tp, clustering in enumerate(cluster_sizes):
+        #     clustering_sequence[time_points[tp]] = [
+        #         _Block(
+        #             height=clustering[cid],
+        #             label="{0}".format(cid),
+        #             facecolor=cluster_color[cid],
+        #         ) for cid in clustering
+        #     ]
+        # # now create the fluxes between the clusters
+        # for tidx, tp in enumerate(time_points[1:]):
+        #     fluxes = between_fluxes[tidx]
+        #     for from_csid, to_csid in fluxes:
+        #         _Flow(
+        #             flux=fluxes[(from_csid, to_csid)],
+        #             source_cluster=clustering_sequence[time_points[tidx]][from_csid],
+        #             target_cluster=clustering_sequence[tp][to_csid],
+        #             facecolor='source_cluster'
+        #         )
+
+    def finish(self,):
+        # TODO:
+        pass
 
     def distribute_clusters(self, x_pos):
         r"""
@@ -1539,7 +1613,7 @@ class Alluvial:
         ]
         _redistribute = False
         for cluster in self.clusters[x_pos]:
-            if sum([_flux.flux_width for _flux in cluster.inflows]) == 0.0:
+            if sum([_flow.flux_width for _flow in cluster.inflows]) == 0.0:
                 weights = []
                 positions = []
                 for out_flux in cluster.outflows:
@@ -1690,3 +1764,22 @@ class Alluvial:
             patches[i].set_facecolor(_color)
             patches[i].set_edgecolor(_color)
         return None
+
+
+class AlluvialHandler:
+    def legend_artist(self, legend, orig_handle, fontsize, handlebox):
+        x0, y0 = handlebox.xdescent, handlebox.ydescent
+        width, height = handlebox.width, handlebox.height
+        # TODO:
+        # construct a simple alluvial diag
+        patch = _Block(height=height, xa=x0, ya=y0, width=width, fc='red',
+                       transform=handlebox.get_transform())
+        # patch = mpatches.Rectangle([x0, y0], width, height, facecolor='red',
+        #                            edgecolor='black', hatch='xx', lw=3,
+        #                            transform=handlebox.get_transform())
+        handlebox.add_artist(patch)
+        return patch
+
+
+# set the legend handler for an alluvial diagram
+Legend.update_default_handler_map({SubDiagram: AlluvialHandler()})

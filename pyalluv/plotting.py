@@ -989,6 +989,10 @@ class SubDiagram:
         """Get the layout of this diagram"""
         return self._layout
 
+    def get_columns(self,):
+        """Get all columns of this subdiagram"""
+        return self._columns
+
     def set_column_layout(self, col_id, layout):
         """Set the layout for a single column"""
         # TODO: uncomment once in mpl
@@ -1064,21 +1068,25 @@ class SubDiagram:
           This must be a `key` of the :attr:`~.Alluvial.clusters`
           attribute.
         """
-        layout = self.get_column_layout(col_id)
         x_pos = self._x[col_id]
         nbr_blocks = len(self._columns[col_id])
+        layout = self.get_column_layout(col_id)
         col_hspace = self.get_column_hspace(col_id)
         if nbr_blocks:
             # sort clusters according to height
-            _column = sorted(self._columns[col_id],
-                             key=lambda x: x.get_height())
+            new_ordering, _column = zip(
+                *sorted(enumerate(self._columns[col_id]),
+                        key=lambda x: x[1].get_height())
+            )
             if layout == 'top':
                 self._update_ycoords(_column, col_hspace, layout)
-                pass
+                # TODO: do the reordering outside if/elif/else (after)
+                self._reorder_column(col_id, new_ordering)
             elif layout == 'bottom':
                 _column = _column[::-1]
+                new_ordering = new_ordering[::-1]
                 self._update_ycoords(_column, col_hspace, layout)
-                pass
+                self._reorder_column(col_id, new_ordering)
             # in both cases no further sorting is needed
             if layout == 'centered':
                 # sort so to put biggest height in the middle
@@ -1119,9 +1127,11 @@ class SubDiagram:
                                 key=lambda x: x[1]
                             )
                         )
-                        self._columns[col_id] = [
-                            _column[_k] for _k in cs
-                        ]
+                        self._reorder_column(col_id, ordering=cs)
+                        # self._columns[col_id] = [
+                        #     _column[_k] for _k in cs
+                        # ]
+
                         # redistribute them
                         self._update_ycoords(self._columns[col_id], col_hspace,
                                              layout)
@@ -1174,6 +1184,10 @@ class SubDiagram:
                     self.y_max,
                     _max_y
                 ) if self.y_max is not None else _max_y
+
+    def _reorder_column(self, col_id, ordering):
+        _column = self._columns[col_id]
+        self._columns[col_id] = [_column[newid] for newid in ordering]
 
     # NOTE: almost indep on self
     def _update_ycoords(self, column, column_hspace, layout):
@@ -1487,6 +1501,8 @@ class Alluvial:
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
+        self._kwargs = {}
+        # TODO: unused for now
         self._dirty = False  # indicate if between diagram flows exist
 
         # TODO: if arguments for add are passed they cannot remain in kwargs
@@ -1687,6 +1703,10 @@ class Alluvial:
             self._x = None
         else:
             self._x = _to_valid_sequence(x, 'x')
+
+    def get_diagrams(self):
+        """Get all sub-diagrams."""
+        return self._diagrams
 
     def _create_columns(self, cinit, flows, ext, extout, fractionflows):
         # create the columns

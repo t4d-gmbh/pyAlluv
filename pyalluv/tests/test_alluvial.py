@@ -5,26 +5,26 @@ from pyalluv import Alluvial
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
 test_data = [
-    (flows, [10, 10], True, [[10., 10.], [8., 7., 3.], [7., 7.]]),
+    (flows, [10, 10], True, [[10., 10.], [8., 7., 3.], [7., 7.]], 'top'),
     (
         flows, [[10, 10], [1, 1, 1], [2, 0.5]], True,
-        [[10., 10.], [9., 8., 4.], [10., 10.]]
+        [[10., 10.], [9., 8., 4.], [10., 9.]], ['bottom', 'top', 'bottom']
     ),
     pytest.param(
-        flows, None, True, [[10., 10.], [8., 7., 3.], [7., 7.]],
+        flows, None, True, [[10., 10.], [8., 7., 3.], [7., 7.]], 'top',
         marks=pytest.mark.xfail
     ),
     (
         np.asarray(flows), np.array([10, 10]), True,
-        [[10., 10.], [8., 7., 3.], [7., 7.]]
+        [[10., 10.], [8., 7., 3.], [7., 7.]], 'top'
     ),
     (
         np.asarray(flows), np.asarray([[10, 10], [1, 1, 1], [2, 0.5]]), True,
-        [[10., 10.], [9., 8., 4.], [10., 10.]]
+        [[10., 10.], [9., 8., 4.], [10., 9.]], 'top'
     ),
     pytest.param(
         np.asarray(flows), None, True, [[10., 10.], [8., 7., 3.], [7., 7.]],
-        marks=pytest.mark.xfail
+        'bottom', marks=pytest.mark.xfail
     )
 ]
 test_ids = [
@@ -38,25 +38,46 @@ test_ids = [
 
 
 @pytest.mark.parametrize(
-    'flows, ext, fractionflow, columns',
+    'flows, ext, fractionflow, columns, layout',
     test_data,
     ids=test_ids
 )
 class TestAllivial:
-    def test_simple_alluvial(self, ext, flows, fractionflow, columns):
-        # test creation of alluvial via __init__ directly.
-        alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow)
-        # TODO: check columns
-        assert alluvial.columns == columns
+    def _test_block_ordering(self, alluvial_collumns, ref_columns, layout):
+        # test the resulting block ordering in each column and make sure it
+        # reflects well the chosen layout
+        if isinstance(layout, str):
+            if layout == 'top':
+                _rev = False
+            elif layout == 'bottom':
+                _rev = True
+            rev = [_rev for _ in ref_columns]
+        else:
+            rev = [False if _l == 'top' else True for _l in layout]
+        block_heights = [[b.get_height() for b in c]
+                         for c in alluvial_collumns]
+        assert block_heights == [
+            sorted(c, reverse=rev[i])
+            for i, c in enumerate(ref_columns)
+        ]
 
-    @pytest.mark.skip(reason="later")
-    def test_alluvial_creation(self, ext, flows, fractionflow, columns):
+    def test_simple_alluvial(self, ext, flows, fractionflow, columns, layout):
+        # test creation of alluvial via __init__ directly.
+        alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
+                            layout=layout)
+        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
+                                  columns, layout=layout)
+
+    # @pytest.mark.skip(reason="later")
+    def test_alluvial_creation(self, ext, flows, fractionflow, columns,
+                               layout):
         # test creation of alluvial diagram with add and finish
         alluvial = Alluvial()
-        alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow)
+        alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
+                     layout=layout)
         alluvial.finish()
-        # TODO: check columns
-        assert alluvial.columns == columns
+        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
+                                  columns, layout=layout)
 
     # def test_Node(self):
     #     node = pyalluv.Cluster(

@@ -346,10 +346,11 @@ class _Block:
     #     x0, y0, x1, y1 = self._convert_units()
     #     return transforms.Bbox.from_extents(x0, y0, x1, y1)
 
-    xa = property(get_xa, set_xa)
-    ya = property(get_ya, set_ya)
+    xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
+    ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
+    y = property(get_y, set_y, doc="The y coordinate of the block bottom")
     inflows = property(get_inflows, set_inflows, doc="List of `._Flow` objects"
-                                                     "entering theblock.")
+                                                     "entering the block.")
     outflows = property(get_outflows, set_outflows, doc="List of `._Flow`"
                                                         "objects leaving the"
                                                         "block.")
@@ -873,6 +874,7 @@ class SubDiagram:
     # def __init__(self, patches, match_original=False, **kwargs):
     def __init__(self, x, columns, match_original=False, label=None, yoff=0,
                  hspace=1, hspace_combine='add', label_margin=(0, 0),
+                 layout='centered',
                  **kwargs):
         """
         Parameters
@@ -903,6 +905,27 @@ class SubDiagram:
             the value provided by *hspace*. If set to 'divide' then the sum of
             all spaces between the blocks in a column is set to be equal to
             *hspace*.
+        label_margin : tuple, optional
+            determine the offset in points for the label.
+
+            .. TODO:
+                This should be in points.
+                
+        layout : sequence or str, default: 'centered'
+            The type of layout used to display the diagram.
+            Allowed layout modes are: {'centered', 'bottom', 'top'}.
+
+            If as sequence is provided, the M elements must specify the layout
+            for each of the M columns in the diagram.
+
+            The following options are available:
+
+            - 'centered' (default): The bigger the block (in terms of height)
+              the more it is moved towards the center.
+            - 'bottom': Blocks are sorted according to their height with the
+              biggest blocks at the bottom.
+            - 'top': Blocks are sorted according to their height with the
+              biggest blocks at the top.
 
         Other Parameters
         ----------------
@@ -932,10 +955,14 @@ class SubDiagram:
             for xi, column in zip(x, columns):
                 self._columns.append([_Block(size, xa=xi,
                                      **kwargs) for size in column])
+        self._nbr_columns = len(self._columns)
 
         self._hspace = hspace
+
         # TODO: create set_... and process like set_hspace
         self._hspace_combine = hspace_combine
+        self.set_layout(layout)
+
         self._label_margin = label_margin
 
         if match_original:
@@ -959,12 +986,40 @@ class SubDiagram:
         self._redistribute_vertically = 4
         self.y_min, self.y_max = None, None
 
+    def get_layout(self):
+        """Get the layout of this diagram"""
+        return self._layout
+
+    def set_column_layout(self, col_id, layout):
+        """Set the layout for a single column"""
+        # TODO: uncomment once in mpl
+        # _api.check_in_list(['centered', 'top', 'bottom'], layout=layout)
+        self._layout[col_id] = layout
+
+    def get_column_layout(self, col_id):
+        """Get the layout of a single column."""
+        return self._layout[col_id]
+
+    def set_layout(self, layout):
+        """Set the layout for this diagram"""
+        if isinstance(layout, str):
+            # TODO: uncomment once in mpl
+            # _api.check_in_list(['centered', 'top', 'bottom'], layout=layout)
+            self._layout = [layout for _ in range(self._nbr_columns)]
+        else:
+            self._layout = []
+            for _layout in layout:
+                # TODO: uncomment once in mpl
+                # _api.check_in_list(['centered', 'top', 'bottom'],
+                #                     layout=_layout)
+                self._layout.append(_layout)
+
     def create_collection(self, **kwargs):
         _kwargs = dict(kwargs)
         _update_notNone(_kwargs, self._kwargs)
-        for col_id in range(len(self._columns)):
-            # TODO: handle the mode parameter
-            self.distribute_blocks(col_id, mode='centered')
+        for col_id in range(self._nbr_columns):
+            # TODO: handle the layout parameter
+            self.distribute_blocks(col_id, layout='centered')
             for block in self._columns[col_id]:
                 block.create_patch(**_kwargs)
         self._collection = PatchCollection(
@@ -999,7 +1054,7 @@ class SubDiagram:
             nbr_blocks = len(self._columns[col_id])
             return max(0, self._hspace / (nbr_blocks - 1))
 
-    def distribute_blocks(self, col_id, mode='centered'):
+    def distribute_blocks(self, col_id, layout='centered'):
         """
         Distribute the blocks in a column.
 
@@ -1009,8 +1064,8 @@ class SubDiagram:
           The horizontal position at which the clusters should be distributed.
           This must be a `key` of the :attr:`~.Alluvial.clusters`
           attribute.
-        mode : {'centered', 'bottom', 'top'}, default: 'centered'
-          The vertical distribution mode. The following options are available:
+        layout : {'centered', 'bottom', 'top'}, default: 'centered'
+          The vertical distribution layout. The following options are available:
 
           - 'centered' (default): The bigger the block (in terms of height) the
             more it is moved towards the center.
@@ -1025,28 +1080,30 @@ class SubDiagram:
         print(col_hspace)
         if nbr_blocks:
             # sort clusters according to height
+            _layout = self.get_column_layout(col_id)
             _column = sorted(self._columns[col_id],
                              key=lambda x: x.get_height())
-            if mode == 'top':
+            if layout == 'top':
                 # TODO: inverse either here
                 pass
-            elif mode == 'bottom':
+            elif layout == 'bottom':
                 # TODO: or here
                 pass
             # in both cases no further sorting is needed
-            if mode == 'centered':
+            if layout == 'centered':
                 # sort so to put biggest height in the middle
                 # self._columns[col_id] = _column[::-2][::-1] + \
                 #     _column[nbr_blocks % 2::2][::-1]
                 _column = _column[::-2][::-1] + \
                     _column[nbr_blocks % 2::2][::-1]
                 # set positioning
-                self._distribute_column(_column, nbr_blocks)
+                self._update_ycoords(_column, col_hspace, _layout)
                 # now sort again considering the flows.
                 old_mid_heights = [block.get_yc() for block in _column]
-                # do the redistribution 4 times
+                # do the redistribution a certain amount of times
                 _redistribute = False
                 for _ in range(self._redistribute_vertically):
+                    # TODO: check this as soon as Flows are set-up correctly
                     for block in _column:
                         weights = []
                         positions = []
@@ -1076,8 +1133,8 @@ class SubDiagram:
                             _column[_k] for _k in cs
                         ]
                         # redistribute them
-                        self._distribute_column(self._columns[col_id],
-                                                col_hspace)
+                        self._update_ycoords(self._columns[col_id], col_hspace,
+                                             _layout)
                         old_mid_heights = [
                             block.get_yc() for block in self._columns[col_id]
                         ]
@@ -1128,24 +1185,33 @@ class SubDiagram:
                     _max_y
                 ) if self.y_max is not None else _max_y
 
-    # should more be an 'update_y_in_column' method
-    def _distribute_column(self, column, column_hspace):
+    # NOTE: almost indep on self
+    def _update_ycoords(self, column, column_hspace, layout):
+        """
+        Update the y coordinate of the blocks in a column based on the
+        diagrams vertical offset, the layout chosen for this column and the
+        order of the blocks.
+        """
         displace = self._yoff
         for block in column:
             block.set_y(displace)
             displace += block.get_height() + column_hspace
         # now offset to center
-        # TODO: not sure what this does...
-        low = column[0].get_y()
+        low = column[0].get_y()  # this is just self._yoff
+        # this is just `displace`:
         high = column[-1].get_y() + column[-1].get_height()
-        cent_offset = low + 0.5 * (high - low)
-        # _h_clusters = 0.5 * len(clusters)
-        # cent_idx = int(_h_clusters) - 1 \
-        #     if _h_clusters.is_integer() \
-        #     else int(_h_clusters)
-        # cent_offest = clusters[cent_idx].mid_height
-        for block in column:
-            block.set_y(block.get_y() - cent_offset)
+        if layout == 'centered':
+            cent_offset = low + 0.5 * (high - low)
+            # _h_clusters = 0.5 * len(clusters)
+            # cent_idx = int(_h_clusters) - 1 \
+            #     if _h_clusters.is_integer() \
+            #     else int(_h_clusters)
+            # cent_offest = clusters[cent_idx].mid_height
+            for block in column:
+                block.set_y(block.get_y() - cent_offset)
+        elif layout == 'top':
+            for block in column:
+                block.set_y(block.get_y() - high)
 
     def _swap_clusters(self, n1, n2, hspace, direction='backwards'):
         squared_diff = {}
@@ -1549,7 +1615,7 @@ class Alluvial:
         #             self.clusters[x_pos][n1_idx], self.clusters[x_pos][n2_idx] = self.clusters[
         #                 x_pos
         #             ][n2_idx], self.clusters[x_pos][n1_idx]
-        #             self._distribute_column(x_pos, self.cluster_w_spacing)
+        #             self._update_ycoords(x_pos, self.cluster_w_spacing)
 
         # # positions are set
         # self.y_lim = kwargs.get('y_lim', (self.y_min, self.y_max))
@@ -1988,7 +2054,7 @@ class Alluvial:
             )
             self.clusters[x_pos] = [self.clusters[x_pos][_k] for _k in cs]
             # redistribute them
-            self._distribute_column(x_pos, self.cluster_w_spacing)
+            self._update_ycoords(x_pos, self.cluster_w_spacing)
 
     def get_patchcollection(
         self, match_original=True,

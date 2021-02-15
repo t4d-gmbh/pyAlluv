@@ -1517,7 +1517,7 @@ class Alluvial:
             # keep styling related kwargs
             self._kwargs = _kwargs
             # draw a diagram if *flows* were provided
-            if flows is not None:
+            if flows is not None or ext is not None:
                 sdargs, self._kwargs = SubDiagram.separate_kwargs(self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          label=label, yoff=0, fractionflow=fractionflow,
@@ -1851,6 +1851,7 @@ class Alluvial:
           shape (P) given by *e[i+1]*.
         """
         # check the provided arguments
+        # TODO: make sure empty flows are accepted
         flows = _to_valid_sequence(flows, 'flows')
         nbr_cols = len(flows) + 1
         # check ext and set initial column
@@ -1873,7 +1874,7 @@ class Alluvial:
                 cinit = ext[:]
                 ext = np.zeros(nbr_cols)
 
-        # TODO: prepare visual porperties to pass to blocks & flows
+        # TODO: handle the case where flows is not provided but ext
 
         columns = self._create_columns(cinit, flows, ext, extout,
                                        fractionflow)

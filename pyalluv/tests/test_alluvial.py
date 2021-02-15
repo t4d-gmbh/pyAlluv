@@ -1,6 +1,7 @@
 import pytest
 import numpy as np
 from pyalluv import Alluvial
+from matplotlib.testing.decorators import check_figures_equal
 
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
@@ -27,25 +28,19 @@ test_data = [
         'bottom', marks=pytest.mark.xfail
     )
 ]
-test_ids = [
-    'lists-fractionflows',
-    'lists-fractionflows-extInitOnly',
-    'lists-fractionflows-extMissing',
-    'arrays-fractionflows',
-    'arrays-fractionflows-extInitOnly',
-    'arrays-fractionflows-extMissing',
-]
+test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
+            'lists-fractionflows-extMissing', 'arrays-fractionflows',
+            'arrays-fractionflows-extInitOnly',
+            'arrays-fractionflows-extMissing']
 
 
 @pytest.mark.parametrize(
-    'flows, ext, fractionflow, columns, layout',
-    test_data,
-    ids=test_ids
+    'flows, ext, fractionflow, columns, layout', test_data, ids=test_ids
 )
-class TestAllivial:
+class TestAlluivial:
     def _test_block_ordering(self, alluvial_collumns, ref_columns, layout):
-        # test the resulting block ordering in each column and make sure it
-        # reflects well the chosen layout
+        # test whether the resulting block ordering in each column reflects
+        # the chosen layout (only 'top' and 'bottom')
         if isinstance(layout, str):
             if layout == 'top':
                 _rev = False
@@ -78,6 +73,26 @@ class TestAllivial:
         alluvial.finish()
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
                                   columns, layout=layout)
+
+
+class TestAlluvialStyling:
+    @check_figures_equal()
+    def test_Block_styling(self, fig_test, fig_ref):
+        # check if the styling parameter are passed along correctly to the
+        # creation of Rectangles.
+        from matplotlib.patches import Rectangle
+        tesax = fig_test.subplots()
+        refax = fig_ref.subplots()
+        # draw a simple Recangle on refax
+        refax.add_patch(Rectangle((0, 0), width=1, height=3))
+        # draw an alluvial with 1 diagram 1 col and a single block on tesax
+        tesax.add_patch(Rectangle((0, 0), width=1, height=3))
+
+        # set common limits and axis styling
+        refax.set_xlim(-1, 2)
+        tesax.set_xlim(-1, 2)
+        refax.set_ylim(-1, 4)
+        tesax.set_ylim(-1, 4)
 
     # def test_Node(self):
     #     node = pyalluv.Cluster(

@@ -910,7 +910,6 @@ class SubDiagram:
 
             .. TODO:
                 This should be in points.
-                
         layout : sequence or str, default: 'centered'
             The type of layout used to display the diagram.
             Allowed layout modes are: {'centered', 'bottom', 'top'}.
@@ -1019,7 +1018,7 @@ class SubDiagram:
         _update_notNone(_kwargs, self._kwargs)
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
-            self.distribute_blocks(col_id, layout='centered')
+            self.distribute_blocks(col_id)
             for block in self._columns[col_id]:
                 block.create_patch(**_kwargs)
         self._collection = PatchCollection(
@@ -1054,7 +1053,7 @@ class SubDiagram:
             nbr_blocks = len(self._columns[col_id])
             return max(0, self._hspace / (nbr_blocks - 1))
 
-    def distribute_blocks(self, col_id, layout='centered'):
+    def distribute_blocks(self, col_id):
         """
         Distribute the blocks in a column.
 
@@ -1064,30 +1063,21 @@ class SubDiagram:
           The horizontal position at which the clusters should be distributed.
           This must be a `key` of the :attr:`~.Alluvial.clusters`
           attribute.
-        layout : {'centered', 'bottom', 'top'}, default: 'centered'
-          The vertical distribution layout. The following options are available:
-
-          - 'centered' (default): The bigger the block (in terms of height) the
-            more it is moved towards the center.
-          - 'bottom': Blocks are sorted according to their height with the
-            biggest blocks at the bottom.
-          - 'top': Blocks are sorted according to their height with the
-            biggest blocks at the top.
         """
+        layout = self.get_column_layout(col_id)
         x_pos = self._x[col_id]
         nbr_blocks = len(self._columns[col_id])
         col_hspace = self.get_column_hspace(col_id)
-        print(col_hspace)
         if nbr_blocks:
             # sort clusters according to height
-            _layout = self.get_column_layout(col_id)
             _column = sorted(self._columns[col_id],
                              key=lambda x: x.get_height())
             if layout == 'top':
-                # TODO: inverse either here
+                self._update_ycoords(_column, col_hspace, layout)
                 pass
             elif layout == 'bottom':
-                # TODO: or here
+                _column = _column[::-1]
+                self._update_ycoords(_column, col_hspace, layout)
                 pass
             # in both cases no further sorting is needed
             if layout == 'centered':
@@ -1097,7 +1087,7 @@ class SubDiagram:
                 _column = _column[::-2][::-1] + \
                     _column[nbr_blocks % 2::2][::-1]
                 # set positioning
-                self._update_ycoords(_column, col_hspace, _layout)
+                self._update_ycoords(_column, col_hspace, layout)
                 # now sort again considering the flows.
                 old_mid_heights = [block.get_yc() for block in _column]
                 # do the redistribution a certain amount of times
@@ -1134,7 +1124,7 @@ class SubDiagram:
                         ]
                         # redistribute them
                         self._update_ycoords(self._columns[col_id], col_hspace,
-                                             _layout)
+                                             layout)
                         old_mid_heights = [
                             block.get_yc() for block in self._columns[col_id]
                         ]
@@ -1273,6 +1263,19 @@ class SubDiagram:
         else:
             return False
 
+    @classmethod
+    def separate_kwargs(cls, kwargs):
+        """Separate all relevant kwargs for the init if a SubDiagram."""
+        sdkwargs, other_kwargs = dict(), dict()
+        relevant_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
+                         'hspace_combine', 'label_margin']
+        for k, v in kwargs.items():
+            if k in relevant_args:
+                sdkwargs[k] = v
+            else:
+                other_kwargs[k] = v
+        return sdkwargs, other_kwargs
+
 
 class Alluvial:
     """
@@ -1285,7 +1288,8 @@ class Alluvial:
     """
     # @docstring.dedent_interpd
     def __init__(self, x=None, ax=None, y_pos='overwrite', tags=None,
-                 cluster_w_spacing=1, blockprops=None, flux_kwargs={},
+                 cluster_w_spacing=1, blockprops=None,
+                 flux_kwargs={},
                  label_kwargs={}, **kwargs):
         """
         Create a new Alluvial instance.
@@ -1498,9 +1502,10 @@ class Alluvial:
             self._kwargs = _kwargs
             # draw a diagram if *flows* were provided
             if flows is not None:
+                sdargs, self._kwargs = SubDiagram.separate_kwargs(self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          label=label, yoff=0, fractionflow=fractionflow,
-                         tags=tags, **_kwargs)
+                         tags=tags, **sdargs)
                 self.finish()
 
         # # if blocks are given in a list of lists (each list is a x position)
@@ -1788,11 +1793,10 @@ class Alluvial:
             blocks with this tag. See :meth:`
         Other Parameters
         ----------------
-        **kwargs : `.Collection` properties
-            Set the styling of all block in the diagram. Allowed parameters
-            are:
+        **kwargs : `.SubDiagram` properties
 
-            %(Collection_kwdoc)s
+            .. TODO:
+                get doc from SubDiagram.__init__
 
         Notes
         -----
@@ -1858,8 +1862,9 @@ class Alluvial:
         else:
             # use default if not specified
             x = self._x or [i for i in range(len(columns))]
+        sdkw, otherkw = SubDiagram.separate_kwargs(kwargs)
         diagram = SubDiagram(x=x, columns=columns, label=label, yoff=yoff,
-                             **kwargs)
+                             **sdkw)
         # add the new subdiagram
         # get the x coordinates
         # TODO: cannot pass columns here. columns are a list of list[float]

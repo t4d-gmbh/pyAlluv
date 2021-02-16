@@ -49,6 +49,7 @@ def _to_valid_sequence(data, attribute):
 
 
 def _update_notNone(dict_to_update, new_dict):
+    """Use values from new_dict if they are not None"""
     dict_to_update.update({k: v
                            for k, v in new_dict.items()
                            if v is not None})
@@ -73,7 +74,7 @@ class _Block:
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
     def __init__(self, height, xa=None, ya=None, width=1.0, label=None,
-                 tag=None, horizontalalignment='center',
+                 tag=None, horizontalalignment='left',
                  verticalalignment='bottom', label_margin=(0, 0),
                  pathprops=None, **kwargs):
         """
@@ -349,6 +350,7 @@ class _Block:
     xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
     ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
     y = property(get_y, set_y, doc="The y coordinate of the block bottom")
+    x = property(get_x, None, doc="The x coordinate of the block bottom")
     inflows = property(get_inflows, set_inflows, doc="List of `._Flow` objects"
                                                      "entering the block.")
     outflows = property(get_outflows, set_outflows, doc="List of `._Flow`"
@@ -403,15 +405,8 @@ class _Block:
     # )
 
     def create_patch(self, **kwargs):
-        # TODO: This method is essentially useless if _Block is a Patch
-        # NOTE: however, that Alluvial passes 'cluster_kwargs' down into this
-        # when calling Alluvial.get_patchcollection, and since Alluvial should
-        # define the default, 'cluster_kwargs' should be used when initiating
-        # _Blocks. alternatively a Patch could be creates as 'template_block'
-        # and then call slef.update_from(tempate_block) to set the styling,
-        # however this would overwrite specific block styles
         _kwargs = dict(kwargs)
-        _kwargs.update(self._kwargs)
+        _update_notNone(_kwargs, self._kwargs)
         self._patch = Rectangle(self.get_xy(), self._width, self._height,
                                 **_kwargs)
         return self._patch
@@ -952,8 +947,9 @@ class SubDiagram:
         else:
             self._columns = []
             for xi, column in zip(x, columns):
-                self._columns.append([_Block(size, xa=xi,
-                                     **kwargs) for size in column])
+                self._columns.append([_Block(size, xa=xi) for size in column])
+                # self._columns.append([_Block(size, xa=xi,
+                #                      **kwargs) for size in column])
         self._nbr_columns = len(self._columns)
 
         self._hspace = hspace
@@ -976,6 +972,12 @@ class SubDiagram:
                 kwargs['linewidths'] = [p.get_linewidth() for p in column]
                 kwargs['linestyles'] = [p.get_linestyle() for p in column]
                 kwargs['antialiaseds'] = [p.get_antialiased() for p in column]
+        # get cmap data:
+        self._cmap_data = kwargs.pop('cmap_array', None)
+        if self._cmap_data is not None:
+            # TODO: allow either a block property, x, or custom array
+            self._cmap_data = 'x'
+
         # super().__init__(label=label, **kwargs)
         # TODO: when should this be called? Why not here already?
         # self.set_paths(self._columns)
@@ -1019,18 +1021,26 @@ class SubDiagram:
 
     def create_collection(self, **kwargs):
         _kwargs = dict(kwargs)
-        _update_notNone(_kwargs, self._kwargs)
+        _kwargs.update(self._kwargs)
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
             self.distribute_blocks(col_id)
             for block in self._columns[col_id]:
-                block.create_patch(**_kwargs)
+                # do not allow to pass kws to patch here.
+                # block.create_patch(**_kwargs)
+                block.create_patch()
         self._collection = PatchCollection(
             [block.get_patch()
              for column in self._columns
              for block in column],
-            match_original=True
+            match_original=True,
+            **_kwargs
         )
+        if self._cmap_data is not None:
+            self._collection.set_array(
+                np.asarray([getattr(block, self._cmap_data)
+                            for column in self._columns
+                            for block in column]))
 
     def get_collection(self):
         return self._collection
@@ -1055,7 +1065,10 @@ class SubDiagram:
             return self._hspace
         else:
             nbr_blocks = len(self._columns[col_id])
-            return max(0, self._hspace / (nbr_blocks - 1))
+            if nbr_blocks > 1:
+                return self._hspace / (nbr_blocks - 1)
+            else:
+                return 0
 
     def distribute_blocks(self, col_id):
         """
@@ -1277,12 +1290,14 @@ class SubDiagram:
         else:
             return False
 
+    # TODO: automate the attribute separation or separate by construction
     @classmethod
     def separate_kwargs(cls, kwargs):
         """Separate all relevant kwargs for the init if a SubDiagram."""
         sdkwargs, other_kwargs = dict(), dict()
         relevant_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
-                         'hspace_combine', 'label_margin']
+                         'hspace_combine', 'label_margin', 'cmap', 'norm',
+                         'cmap_array']
         for k, v in kwargs.items():
             if k in relevant_args:
                 sdkwargs[k] = v
@@ -1520,8 +1535,8 @@ class Alluvial:
             if flows is not None or ext is not None:
                 sdargs, self._kwargs = SubDiagram.separate_kwargs(self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
-                         label=label, yoff=0, fractionflow=fractionflow,
-                         tags=tags, **sdargs)
+                         match_original=False, label=label, yoff=0,
+                         fractionflow=fractionflow, tags=tags, **sdargs)
                 self.finish()
 
         # # if blocks are given in a list of lists (each list is a x position)
@@ -1711,18 +1726,19 @@ class Alluvial:
     def _create_columns(self, cinit, flows, ext, extout, fractionflows):
         # create the columns
         columns = [cinit]
-        for flow, e in zip(flows, ext[1:]):
-            _col = e
-            if len(flow):
-                if fractionflows:
-                    _flow = flow.dot(columns[-1])
-                else:
-                    _flow = flow.sum(1)
-                _col = _flow + e
-            columns.append(_col)
+        if flows is not None:
+            for flow, e in zip(flows, ext[1:]):
+                _col = e
+                if len(flow):
+                    if fractionflows:
+                        _flow = flow.dot(columns[-1])
+                    else:
+                        _flow = flow.sum(1)
+                    _col = _flow + e
+                columns.append(_col)
 
         if extout is not None:
-            # check extout format
+            # TODO: check extout format
             pass
         return columns
 
@@ -1853,7 +1869,10 @@ class Alluvial:
         # check the provided arguments
         # TODO: make sure empty flows are accepted
         flows = _to_valid_sequence(flows, 'flows')
-        nbr_cols = len(flows) + 1
+        if flows:
+            nbr_cols = len(flows) + 1
+        else:
+            nbr_cols = None
         # check ext and set initial column
         if ext is None:
             if fractionflow:
@@ -1862,6 +1881,10 @@ class Alluvial:
                                 " sizes for the first column of the Alluvial"
                                 " diagram if the flows are given as"
                                 " fractions.")
+            elif nbr_cols is None:
+                raise TypeError("'ext' cannot be None if 'flows' is None too."
+                                " You need to provide either `flows` or `ext`"
+                                " to create an Alluvial diagram.")
             ext = np.zeros(nbr_cols)
             # Note: extout from the first column are ignored in the
             # construction of the first columns
@@ -1870,9 +1893,15 @@ class Alluvial:
             ext = _to_valid_sequence(ext, 'ext')
             if isinstance(ext[0], np.ndarray):
                 cinit = ext[0]
+                # if no flows were provided
+                if nbr_cols is None:
+                    nbr_cols = len(ext)
+                    flows = [[] for _ in range(nbr_cols)]
             else:
                 cinit = ext[:]
-                ext = np.zeros(nbr_cols)
+                if nbr_cols is None:
+                    nbr_cols = 1
+                ext = np.zeros(nbr_cols)  # Note: we overwrite ext in this case
 
         # TODO: handle the case where flows is not provided but ext
 

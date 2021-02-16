@@ -78,19 +78,27 @@ class TestAlluivial:
 class TestAlluvialStyling:
     @check_figures_equal()
     def test_Block_styling(self, fig_test, fig_ref):
+        # dev-test
         # check if the styling parameter are passed along correctly to the
         # creation of Rectangles.
         from matplotlib.patches import Rectangle
+        from matplotlib.collections import PatchCollection
+        # set styling
+        style = dict(ec='green', fc='red', lw=2, alpha=0.2)
+        # create the two figures
         tesax = fig_test.subplots()
         refax = fig_ref.subplots()
         # draw a simple Recangle on refax
-        refax.add_patch(Rectangle((0, 0), width=1, height=3))
+        pc = []
+        pc.append(Rectangle((0, 0), width=1, height=3, **style))
+        pc.append(Rectangle((2, 0), width=1, height=2, **style))
+        refax.add_collection(PatchCollection(pc, match_original=True))
         # draw an alluvial with 1 diagram 1 col and a single block on tesax
-        tesax.add_patch(Rectangle((0, 0), width=1, height=3))
+        Alluvial([0, 2], ax=tesax, ext=[[3], [2]], layout='bottom', **style)
 
         # set common limits and axis styling
-        refax.set_xlim(-1, 2)
-        tesax.set_xlim(-1, 2)
+        refax.set_xlim(-1, 4)
+        tesax.set_xlim(-1, 4)
         refax.set_ylim(-1, 4)
         tesax.set_ylim(-1, 4)
 

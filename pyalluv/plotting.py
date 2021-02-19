@@ -130,48 +130,10 @@ class _Block:
         self.out_margin = {'bottom': 0, 'top': 0}
         self._kwargs = kwargs
         self._patch = None
-
-    # when it was a Patch
-    # def get_path(self):
-    #     """Return the vertices of the block."""
-    #     # vertices = [
-    #     #     (self._x0, self._y0),
-    #     #     (self._x0, self._y0 + self._height),
-    #     #     (self._x0 + self._width, self._y0 + self._height),
-    #     #     (self._x0 + self._width, self._y0),
-    #     #     (self._x0, self._y0)  # ignored as codes[-1] is CLOSEPOLY
-    #     # ]
-    #     # codes = [
-    #     #     Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY
-    #     # ]
-    #     # return Path(
-    #     #     vertices,
-    #     #     codes,
-    #     #     **self.pathprops
-    #     # )
-    #     return Path.unit_rectangle()
-
-    # when it was a Patch
-    # def _convert_units(self):
-    #     """Convert bounds of the rectangle."""
-    #     x0, y0 = self.get_xy()
-    #     x0 = self.convert_xunits(x0)
-    #     y0 = self.convert_yunits(y0)
-    #     x1 = self.convert_xunits(x0 + self._width)
-    #     y1 = self.convert_yunits(y0 + self._height)
-    #     return x0, y0, x1, y1
-
-    # when it was a Patch
-    # def get_patch_transform(self):
-    #     # Note: This cannot be called until after this has been added to
-    #     # an Axes, otherwise unit conversion will fail. This makes it very
-    #     # important to call the accessor method and not directly access the
-    #     # transformation member variable.
-    #     bbox = self.get_bbox()
-    #     # return (transforms.BboxTransformTo(bbox)
-    #     #         + transforms.Affine2D().rotate_deg_around(
-    #     #             bbox.x0, bbox.y0, self.angle))
-    #     return transforms.BboxTransformTo(bbox)
+        # TODO: if position or styling changes, set to true so to redraw the
+        # patch, in get_patch if stale is True, redraw the patch before
+        # returning it.
+        self._stale = True
 
     def get_xa(self):
         """Return the x coordinate of the anchor point."""
@@ -369,6 +331,47 @@ class _Block:
     def add_inflow(self, inflow):
         self._inflows.append(inflow)
 
+    # when it was a Patch
+    # def get_path(self):
+    #     """Return the vertices of the block."""
+    #     # vertices = [
+    #     #     (self._x0, self._y0),
+    #     #     (self._x0, self._y0 + self._height),
+    #     #     (self._x0 + self._width, self._y0 + self._height),
+    #     #     (self._x0 + self._width, self._y0),
+    #     #     (self._x0, self._y0)  # ignored as codes[-1] is CLOSEPOLY
+    #     # ]
+    #     # codes = [
+    #     #     Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY
+    #     # ]
+    #     # return Path(
+    #     #     vertices,
+    #     #     codes,
+    #     #     **self.pathprops
+    #     # )
+    #     return Path.unit_rectangle()
+
+    # when it was a Patch
+    # def _convert_units(self):
+    #     """Convert bounds of the rectangle."""
+    #     x0, y0 = self.get_xy()
+    #     x0 = self.convert_xunits(x0)
+    #     y0 = self.convert_yunits(y0)
+    #     x1 = self.convert_xunits(x0 + self._width)
+    #     y1 = self.convert_yunits(y0 + self._height)
+    #     return x0, y0, x1, y1
+
+    # when it was a Patch
+    # def get_patch_transform(self):
+    #     # Note: This cannot be called until after this has been added to
+    #     # an Axes, otherwise unit conversion will fail. This makes it very
+    #     # important to call the accessor method and not directly access the
+    #     # transformation member variable.
+    #     bbox = self.get_bbox()
+    #     # return (transforms.BboxTransformTo(bbox)
+    #     #         + transforms.Affine2D().rotate_deg_around(
+    #     #             bbox.x0, bbox.y0, self.angle))
+    #     return transforms.BboxTransformTo(bbox)
     # def set_mid_height(self, mid_height):
     #     self._mid_height = mid_height
     #     if self._mid_height is not None:
@@ -379,6 +382,7 @@ class _Block:
     #         self._y0 = None
     #     self.stale = True
 
+    # old
     # def get_mid_height(self):
     #     if self._mid_height is None:
     #         _log.warning(
@@ -417,6 +421,10 @@ class _Block:
         #     self.get_path(),
         #     **_kwargs
         # )
+        # TODO: set stale=True in setter fcts
+        if self._stale:
+            self.create_patch()
+            self._stale = False
         return self._patch
 
     def update_locations(self,):
@@ -427,15 +435,15 @@ class _Block:
         self._set_outloc()
         self._set_inloc()
 
-    def set_loc_out_fluxes(self,):
+    def set_loc_out_flows(self,):
         yc = self.get_yc()
-        for out_flux in self._outflows:
+        for out_flow in self._outflows:
             in_loc = None
             out_loc = None
-            if out_flux.target_cluster is not None:
-                if yc > out_flux.target_cluster.get_yc():
+            if out_flow.target is not None:
+                if yc > out_flow.target.get_yc():
                     # draw to top
-                    if yc >= out_flux.target_cluster.inloc['top'][1]:
+                    if yc >= out_flow.target.inloc['top'][1]:
                         # draw from bottom to in top
                         out_loc = 'bottom'
                         in_loc = 'top'
@@ -445,7 +453,7 @@ class _Block:
                         in_loc = 'top'
                 else:
                     # draw to bottom
-                    if yc <= out_flux.target_cluster.inloc['bottom'][1]:
+                    if yc <= out_flow.target.inloc['bottom'][1]:
                         # draw from top to bottom
                         out_loc = 'top'
                         in_loc = 'bottom'
@@ -454,37 +462,37 @@ class _Block:
                         out_loc = 'bottom'
                         in_loc = 'bottom'
             else:
-                out_flux.out_loc = out_flux.out_flux_vanish
-            out_flux.in_loc = in_loc
-            out_flux.out_loc = out_loc
+                out_flow.out_loc = out_flow.out_flow_vanish
+            out_flow.in_loc = in_loc
+            out_flow.out_loc = out_loc
 
-    def sort_out_fluxes(self,):
-        _top_fluxes = [
+    def sort_out_flows(self,):
+        _top_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
             if self._outflows[i].out_loc == 'top'
         ]
-        _bottom_fluxes = [
+        _bottom_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
             if self._outflows[i].out_loc == 'bottom'
         ]
-        if _top_fluxes:
-            sorted_top_idx, _fluxes_top = zip(*sorted(
-                _top_fluxes,
-                key=lambda x: x[1].target_cluster.get_yc()
-                if x[1].target_cluster
+        if _top_flows:
+            sorted_top_idx, _flows_top = zip(*sorted(
+                _top_flows,
+                key=lambda x: x[1].target.get_yc()
+                if x[1].target
                 # TODO: this should not simply be -10000
                 else -10000,
                 reverse=True
             ))
         else:
             sorted_top_idx = []
-        if _bottom_fluxes:
-            sorted_bottom_idx, _fluxes_bottom = zip(*sorted(
-                _bottom_fluxes,
-                key=lambda x: x[1].target_cluster.get_yc()
-                if x[1].target_cluster
+        if _bottom_flows:
+            sorted_bottom_idx, _flows_bottom = zip(*sorted(
+                _bottom_flows,
+                key=lambda x: x[1].target.get_yc()
+                if x[1].target
                 # TODO: this should not simply be -10000
                 else -10000,
                 reverse=False
@@ -494,33 +502,33 @@ class _Block:
         sorted_idx = list(sorted_top_idx) + list(sorted_bottom_idx)
         self._outflows = [self._outflows[i] for i in sorted_idx]
 
-    def sort_in_fluxes(self,):
-        _top_fluxes = [
+    def sort_in_flows(self,):
+        _top_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
             if self._inflows[i].in_loc == 'top'
         ]
-        _bottom_fluxes = [
+        _bottom_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
             if self._inflows[i].in_loc == 'bottom'
         ]
-        if _top_fluxes:
-            sorted_top_idx, _fluxes_top = zip(*sorted(
-                _top_fluxes,
-                key=lambda x: x[1].source_cluster.get_yc()
-                if x[1].source_cluster
+        if _top_flows:
+            sorted_top_idx, _flows_top = zip(*sorted(
+                _top_flows,
+                key=lambda x: x[1].source.get_yc()
+                if x[1].source
                 # TODO: this should not simply be -10000
                 else -10000,
                 reverse=True
             ))
         else:
             sorted_top_idx = []
-        if _bottom_fluxes:
-            sorted_bottom_idx, _fluxes_bottom = zip(*sorted(
-                _bottom_fluxes,
-                key=lambda x: x[1].source_cluster.get_yc()
-                if x[1].source_cluster
+        if _bottom_flows:
+            sorted_bottom_idx, _flows_bottom = zip(*sorted(
+                _bottom_flows,
+                key=lambda x: x[1].source.get_yc()
+                if x[1].source
                 # TODO: this should not simply be -10000
                 else -10000,
                 reverse=False
@@ -530,44 +538,44 @@ class _Block:
         sorted_idx = list(sorted_top_idx) + list(sorted_bottom_idx)
         self._inflows = [self._inflows[i] for i in sorted_idx]
 
-    def get_loc_out_flux(self, flux_width, out_loc, in_loc):
+    def get_loc_out_flow(self, flow_width, out_loc, in_loc):
         anchor_out = (
             self.outloc[out_loc][0],
-            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flux_width if in_loc == 'bottom' else 0)
+            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'bottom' else 0)
         )
         top_out = (
             self.outloc[out_loc][0],
-            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flux_width if in_loc == 'top' else 0)
+            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'top' else 0)
         )
-        self.out_margin[out_loc] += flux_width
+        self.out_margin[out_loc] += flow_width
         return anchor_out, top_out
 
-    def set_anchor_out_fluxes(self,):
-        for out_flux in self._outflows:
-            out_width = out_flux.flux_width \
-                if out_flux.out_loc == 'bottom' else - out_flux.flux_width
-            out_flux.anchor_out, out_flux.top_out = self.get_loc_out_flux(
-                out_width, out_flux.out_loc, out_flux.in_loc
+    def set_anchor_out_flows(self,):
+        for out_flow in self._outflows:
+            out_width = out_flow.flow_width \
+                if out_flow.out_loc == 'bottom' else - out_flow.flow_width
+            out_flow.anchor_out, out_flow.top_out = self.get_loc_out_flow(
+                out_width, out_flow.out_loc, out_flow.in_loc
             )
 
-    def set_anchor_in_fluxes(self,):
-        for in_flux in self._inflows:
-            in_width = in_flux.flux_width \
-                if in_flux.in_loc == 'bottom' else - in_flux.flux_width
-            in_flux.anchor_in, in_flux.top_in = self.get_loc_in_flux(
-                in_width, in_flux.out_loc, in_flux.in_loc
+    def set_anchor_in_flows(self,):
+        for in_flow in self._inflows:
+            in_width = in_flow.flow_width \
+                if in_flow.in_loc == 'bottom' else - in_flow.flow_width
+            in_flow.anchor_in, in_flow.top_in = self.get_loc_in_flow(
+                in_width, in_flow.out_loc, in_flow.in_loc
             )
 
-    def get_loc_in_flux(self, flux_width, out_loc, in_loc):
+    def get_loc_in_flow(self, flow_width, out_loc, in_loc):
         anchor_in = (
             self.inloc[in_loc][0],
-            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flux_width if out_loc == 'bottom' else 0)
+            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'bottom' else 0)
         )
         top_in = (
             self.inloc[in_loc][0],
-            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flux_width if out_loc == 'top' else 0)
+            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'top' else 0)
         )
-        self.in_margin[in_loc] += flux_width
+        self.in_margin[in_loc] += flow_width
         return anchor_in, top_in
 
     def _set_inloc(self,):
@@ -587,55 +595,58 @@ class _Block:
 
 
 class _Flow(object):
-    r"""
-
-    Parameters
-    -----------
-    relative_flux: bool
-      If ``True`` the fraction of the height of parameter `source_cluster`
-      is taken, if the source_cluster is none, then the
-      relative height form the target_cluster is taken.
-    source_cluster: :class:`pyalluv.clusters.Cluster` (default=None)
-      Cluster from which the flux originates.
-    target_cluster: :class:`pyalluv.clusters.Cluster` (default=None)
-      Cluster into which the flux leads.
-    \**kwargs optional parameter:
-      interpolation_steps:
-
-      out_flux_vanish: str (default='top')
-
-      default_fc: (default='gray')
-
-      default_ec: (default='gray')
-
-      default_alpha: int (default=0.3)
-
-      closed
-      readonly
-      facecolors
-      edgecolors
-      linewidths
-      linestyles
-      antialiaseds
-
-    Attributes
-    -----------
-
-    flux: float
-      The size of the flux which will translate to the height of the flux in
-      the Alluvial diagram.
-    source_cluster: :class:`pyalluv.clusters.Cluster` (default=None)
-      Cluster from which the flux originates.
-    target_cluster: :class:`pyalluv.clusters.Cluster` (default=None)
-      Cluster into which the flux leads.
+    """
+    A connection between two blocks from adjacent columns.
     """
     def __init__(
-            self, flux,
-            source_cluster=None, target_cluster=None,
-            relative_flux=False,
+            self, flow,
+            source=None, target=None,
+            relative_flow=False,
             **kwargs):
+        r"""
+
+        Parameters
+        -----------
+        relative_flow: bool
+          If ``True`` the fraction of the height of parameter `source`
+          is taken, if the source is none, then the
+          relative height form the target is taken.
+        source: :class:`pyalluv.clusters.Cluster` (default=None)
+          Cluster from which the flow originates.
+        target: :class:`pyalluv.clusters.Cluster` (default=None)
+          Cluster into which the flow leads.
+        \**kwargs optional parameter:
+          interpolation_steps:
+
+          out_flow_vanish: str (default='top')
+
+          default_fc: (default='gray')
+
+          default_ec: (default='gray')
+
+          default_alpha: int (default=0.3)
+
+          closed
+          readonly
+          facecolors
+          edgecolors
+          linewidths
+          linestyles
+          antialiaseds
+
+        Attributes
+        -----------
+
+        flow: float
+          The size of the flow which will translate to the height of the flow in
+          the Alluvial diagram.
+        source: :class:`pyalluv.clusters.Cluster` (default=None)
+          Cluster from which the flow originates.
+        target: :class:`pyalluv.clusters.Cluster` (default=None)
+          Cluster into which the flow leads.
+        """
         self._interp_steps = kwargs.pop('interpolation_steps', 1)
-        self.out_flux_vanish = kwargs.pop('out_flux_vanish', 'top')
+        self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
         self.default_fc = kwargs.pop('default_fc', 'gray')
         self.default_ec = kwargs.pop('default_ec', 'gray')
         self.default_alpha = kwargs.pop('default_alpha', 0.3)
@@ -650,29 +661,29 @@ class _Flow(object):
             'linewidth', self.patch_kwargs.pop('lw', 0.0)
         )
 
-        if isinstance(flux, (list, tuple)):
-            self.flux = len(flux)
+        if isinstance(flow, (list, tuple)):
+            self.flow = len(flow)
         else:
-            self.flux = flux
-        self.relative_flux = relative_flux
-        self.source_cluster = source_cluster
-        self.target_cluster = target_cluster
-        if self.source_cluster is not None:
-            if self.relative_flux:
-                self.flux_width = self.flux * self.source_cluster.get_height()
+            self.flow = flow
+        self.relative_flow = relative_flow
+        self.source = source
+        self.target = target
+        if self.source is not None:
+            if self.relative_flow:
+                self.flow_width = self.flow * self.source.get_height()
             else:
-                self.flux_width = self.flux
+                self.flow_width = self.flow
         else:
-            if self.target_cluster is not None:
-                if self.relative_flux:
-                    self.flux_width = self.flux * self.target_cluster.get_height()
+            if self.target is not None:
+                if self.relative_flow:
+                    self.flow_width = self.flow * self.target.get_height()
                 else:
-                    self.flux_width = self.flux
-        # append the flux to the clusters
-        if self.source_cluster is not None:
-            self.source_cluster.add_outflow(self)
-        if self.target_cluster is not None:
-            self.target_cluster.add_inflow(self)
+                    self.flow_width = self.flow
+        # append the flow to the clusters
+        if self.source is not None:
+            self.source.add_outflow(self)
+        if self.target is not None:
+            self.target.add_inflow(self)
 
     def get_patch(self, **kwargs):
         _kwargs = dict(kwargs)
@@ -683,7 +694,7 @@ class _Flow(object):
                 _to_in_kwargs[kw[3:]] = _kwargs.pop(kw)
             elif kw.startswith('out_'):
                 _to_out_kwargs[kw[3:]] = _kwargs.pop(kw)
-        # update with Flux specific styling
+        # update with flow specific styling
         _kwargs.update(self.patch_kwargs)
         for _color in ['facecolor', 'edgecolor']:
             _set_color = _kwargs.pop(_color, None)
@@ -692,29 +703,29 @@ class _Flow(object):
                 _kwargs['alpha'] = _set_alpha
                 _set_alpha = None
             color_is_set = False
-            if _set_color == 'source_cluster' or _set_color == 'cluster':
-                from_cluster = self.source_cluster
+            if _set_color == 'source' or _set_color == 'cluster':
+                from_cluster = self.source
                 color_is_set = True
-            elif _set_color == 'target_cluster':
-                from_cluster = self.target_cluster
+            elif _set_color == 'target':
+                from_cluster = self.target
                 color_is_set = True
             elif isinstance(_set_color, str) and '__' in _set_color:
                 which_cluster, flow_type = _set_color.split('__')
-                if which_cluster == 'target_cluster':
-                    from_cluster = self.target_cluster
+                if which_cluster == 'target':
+                    from_cluster = self.target
                 else:
-                    from_cluster = self.source_cluster
+                    from_cluster = self.source
                 if flow_type == 'migration' \
-                        and self.source_cluster.patch_kwargs.get(_color) \
-                        != self.target_cluster.patch_kwargs.get(_color):
+                        and self.source.patch_kwargs.get(_color) \
+                        != self.target.patch_kwargs.get(_color):
                     color_is_set = True
                     if _set_alpha:
                         _kwargs['alpha'] = _set_alpha.get(
                             'migration', _set_alpha.get('default', self.default_alpha)
                         )
                 elif flow_type == 'reside'  \
-                        and self.source_cluster.patch_kwargs.get(_color) \
-                        == self.target_cluster.patch_kwargs.get(_color):
+                        and self.source.patch_kwargs.get(_color) \
+                        == self.target.patch_kwargs.get(_color):
                     color_is_set = True
                     if _set_alpha:
                         _kwargs['alpha'] = _set_alpha.get(
@@ -739,7 +750,7 @@ class _Flow(object):
                     _kwargs['alpha'] = _set_alpha.get('default', self.default_alpha)
         # line below is probably not needed as alpha is set with the color
         _kwargs['alpha'] = _kwargs.get('alpha', self.default_alpha)
-        # set in/out only flux styling
+        # set in/out only flow styling
         _in_kwargs = dict(_kwargs)
         _in_kwargs.update(_to_in_kwargs)
         _out_kwargs = dict(_kwargs)
@@ -749,60 +760,60 @@ class _Flow(object):
         if self.out_loc is not None:
             if self.in_loc is not None:
                 _dist = 2 / 3 * (
-                    self.target_cluster.in_['bottom'][0] - self.source_cluster.outloc['bottom'][0]
+                    self.target.in_['bottom'][0] - self.source.outloc['bottom'][0]
                 )
             else:
-                _dist = 2 * self.source_cluster.get_width()
+                _dist = 2 * self.source.get_width()
                 _kwargs = _out_kwargs
         else:
             if self.in_loc is not None:
                 _kwargs = _in_kwargs
             else:
-                raise Exception('Flux with neither source nor target cluster')
+                raise Exception('flow with neither source nor target cluster')
 
         # now complete the path points
         if self.anchor_out is not None:
             anchor_out_inner = (
-                self.anchor_out[0] - 0.5 * self.source_cluster.get_width(),
+                self.anchor_out[0] - 0.5 * self.source.get_width(),
                 self.anchor_out[1]
             )
             dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
         else:
-            # TODO set to form vanishing flux
+            # TODO set to form vanishing flow
             # anchor_out = anchor_out_inner =
             # dir_out_anchor =
             pass
         if self.top_out is not None:
             top_out_inner = (
-                self.top_out[0] - 0.5 * self.source_cluster.get_width(),
+                self.top_out[0] - 0.5 * self.source.get_width(),
                 self.top_out[1]
             )
             # 2nd point 2/3 of distance between clusters
             dir_out_top = (self.top_out[0] + _dist, self.top_out[1])
         else:
-            # TODO set to form vanishing flux
+            # TODO set to form vanishing flow
             # top_out = top_out_inner =
             # dir_out_top =
             pass
         if self.anchor_in is not None:
             anchor_in_inner = (
-                self.anchor_in[0] + 0.5 * self.target_cluster.get_width(),
+                self.anchor_in[0] + 0.5 * self.target.get_width(),
                 self.anchor_in[1]
             )
             dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
         else:
-            # TODO set to form new in flux
+            # TODO set to form new in flow
             # anchor_in = anchor_in_inner =
             # dir_in_anchor =
             pass
         if self.top_in is not None:
             top_in_inner = (
-                self.top_in[0] + 0.5 * self.target_cluster.get_width(),
+                self.top_in[0] + 0.5 * self.target.get_width(),
                 self.top_in[1]
             )
             dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
         else:
-            # TODO set to form new in flux
+            # TODO set to form new in flow
             # top_in = top_in_inner =
             # dir_in_top =
             pass
@@ -825,8 +836,8 @@ class _Flow(object):
         ]
         _path = Path(vertices, codes, self._interp_steps, self.closed, self.readonly)
 
-        flux_patch = patches.PathPatch(_path, **_kwargs)
-        return flux_patch
+        flow_patch = patches.PathPatch(_path, **_kwargs)
+        return flow_patch
 
 
 class Tag:
@@ -867,9 +878,9 @@ class SubDiagram:
 
     """
     # def __init__(self, patches, match_original=False, **kwargs):
-    def __init__(self, x, columns, match_original=False, label=None, yoff=0,
-                 hspace=1, hspace_combine='add', label_margin=(0, 0),
-                 layout='centered',
+    def __init__(self, x, columns, flows, fractionflow, match_original=False,
+                 label=None, yoff=0, hspace=1, hspace_combine='add',
+                 label_margin=(0, 0), layout='centered', blockprops=None,
                  **kwargs):
         """
         Parameters
@@ -882,6 +893,8 @@ class SubDiagram:
             column.
             Allowed are `_Block` objects or floats that will be interpreted as
             the size of a block.
+        flows : sequence of array_like objects
+            ... *TODO*
         match_original : bool, (default=False)
             If True, use the colors and linewidths of the original
             patches.  If False, new colors may be assigned by
@@ -935,6 +948,9 @@ class SubDiagram:
         else:
             self._x = None
         self._yoff = yoff
+        self._blockprops = blockprops or dict()
+
+        # create the columns of Blocks
         columns = list(columns)
         _provided_blocks = False
         for col in columns:
@@ -947,10 +963,29 @@ class SubDiagram:
         else:
             self._columns = []
             for xi, column in zip(x, columns):
-                self._columns.append([_Block(size, xa=xi) for size in column])
+                self._columns.append([_Block(size, xa=xi, **self._blockprops)
+                                      for size in column])
                 # self._columns.append([_Block(size, xa=xi,
                 #                      **kwargs) for size in column])
         self._nbr_columns = len(self._columns)
+
+        # create the Flows is only based on *flows* and *extout*'s
+        self._flows = []
+        # connect source and target:
+        for m, flowM in enumerate(flows):
+            # m is the source column, m+1 the target column
+            source_col = self._columns[m]
+            target_col = self._columns[m + 1]
+            _flows = []
+            for i, row in enumerate(flowM):
+                # i is the index of the target block
+                for j, f in enumerate(row):
+                    # j is the index of the source block
+                    # TODO: pass kwargs?
+                    _flows.append(_Flow(flow=f, source=source_col[j],
+                                        target=target_col[i],
+                                        relative_flow=fractionflow))
+            self._flows.append(_flows)
 
         self._hspace = hspace
 
@@ -960,6 +995,7 @@ class SubDiagram:
 
         self._label_margin = label_margin
 
+        # TODO: This is back from when it was a subclass of collection > used??
         if match_original:
             def determine_facecolor(patch):
                 if patch.get_fill():
@@ -1045,6 +1081,7 @@ class SubDiagram:
     def get_collection(self):
         return self._collection
 
+    # TODO: This is probably not used, right?!
     def set_paths(self, columns):
         """Set the paths for untagged blocks of the subdiagram."""
         self._paths = []
@@ -1055,6 +1092,7 @@ class SubDiagram:
                  if not p.is_tagged])
 
     def add_block(self, column: int, block):
+        """Add a Block to a column."""
         self._columns[column].append(block)
 
     def add_flow(self, column, flow):
@@ -1118,10 +1156,10 @@ class SubDiagram:
                     for block in _column:
                         weights = []
                         positions = []
-                        for in_flux in block.inflows:
-                            if in_flux.source_cluster is not None:
-                                weights.append(in_flux.flux_width)
-                                positions.append(in_flux.source_cluster.get_yc())
+                        for in_flow in block.inflows:
+                            if in_flow.source is not None:
+                                weights.append(in_flow.flow_width)
+                                positions.append(in_flow.source.get_yc())
                         if sum(weights) > 0.0:
                             _redistribute = True
                             block.set_yc(sum([
@@ -1237,17 +1275,17 @@ class SubDiagram:
             sqdiff = []
             if direction in ['both', 'backwards']:
                 for flow in block.inflows:
-                    if flow.source_cluster is not None:
-                        weights.append(flow.flux_width)
+                    if flow.source is not None:
+                        weights.append(flow.flow_width)
                         sqdiff.append(abs(
-                            block.get_yc() - flow.source_cluster.get_yc()
+                            block.get_yc() - flow.source.get_yc()
                         ))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
-                    if flow.target_cluster is not None:
-                        weights.append(flow.flux_width)
+                    if flow.target is not None:
+                        weights.append(flow.flow_width)
                         sqdiff.append(abs(
-                            block.get_yc() - flow.target_cluster.get_yc()
+                            block.get_yc() - flow.target.get_yc()
                         ))
             if sum(weights) > 0.0:
                 squared_diff[block] = sum(
@@ -1268,17 +1306,17 @@ class SubDiagram:
             sqdiff = []
             if direction in ['both', 'backwards']:
                 for flow in block.inflows:
-                    if flow.source_cluster is not None:
-                        weights.append(flow.flux_width)
+                    if flow.source is not None:
+                        weights.append(flow.flow_width)
                         sqdiff.append(abs(
-                            inv_mid_height[block] - flow.source_cluster.get_yc()
+                            inv_mid_height[block] - flow.source.get_yc()
                         ))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
-                    if flow.target_cluster is not None:
-                        weights.append(flow.flux_width)
+                    if flow.target is not None:
+                        weights.append(flow.flow_width)
                         sqdiff.append(
-                            abs(inv_mid_height[block] - flow.target_cluster.get_yc())
+                            abs(inv_mid_height[block] - flow.target.get_yc())
                         )
             if sum(weights) > 0.0:
                 squared_diff_inf[block] = sum([
@@ -1295,11 +1333,11 @@ class SubDiagram:
     def separate_kwargs(cls, kwargs):
         """Separate all relevant kwargs for the init if a SubDiagram."""
         sdkwargs, other_kwargs = dict(), dict()
-        relevant_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
-                         'hspace_combine', 'label_margin', 'cmap', 'norm',
-                         'cmap_array']
+        sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
+                   'hspace_combine', 'label_margin', 'cmap', 'norm',
+                   'cmap_array', 'blockprops']
         for k, v in kwargs.items():
-            if k in relevant_args:
+            if k in sd_args:
                 sdkwargs[k] = v
             else:
                 other_kwargs[k] = v
@@ -1318,7 +1356,7 @@ class Alluvial:
     # @docstring.dedent_interpd
     def __init__(self, x=None, ax=None, y_pos='overwrite', tags=None,
                  cluster_w_spacing=1, blockprops=None,
-                 flux_kwargs={},
+                 flow_kwargs={},
                  label_kwargs={}, **kwargs):
         """
         Create a new Alluvial instance.
@@ -1336,17 +1374,17 @@ class Alluvial:
             *NOT IMPLEMENTED YET*
 
             Provide for each cluster (`key`) a dictionary specifying the
-            out-fluxes in the form of a dictionary (`key`: cluster, `value`: flux).
+            out-flows in the form of a dictionary (`key`: cluster, `value`: flow).
 
             .. note::
 
-              The `key` ``None`` can hold a dictionary specifying fluxes from/to
+              The `key` ``None`` can hold a dictionary specifying flows from/to
               outside the system. If is present in the provided dictionary it
-              allows to specify in-fluxes, i.e. data source that were not present
+              allows to specify in-flows, i.e. data source that were not present
               at the previous slice.
 
-              If it is present in the out-fluxes of a cluster, the specified amount
-              simply vanishes and will not lead to a flux.
+              If it is present in the out-flows of a cluster, the specified amount
+              simply vanishes and will not lead to a flow.
 
           collections of :obj:`.Cluster`: dict[float, list] and list[list]
             If a `list` is provided each element must be a `list`
@@ -1372,14 +1410,14 @@ class Alluvial:
 
           'overwrite':
              Ignore existing y coordinates for a block and set the vertical
-             position to minimize the vertical displacements of all fluxes.
+             position to minimize the vertical displacements of all flows.
           'keep':
             use the block's :meth:`_Block.get_y`. If a block has no y
             coordinate set this raises an exception.
           'complement':
             use the block's :meth:`_Block.get_y` if
             set. Blocks without y position are positioned relative to the other
-            blocks by minimizing the vertical displacements of all fluxes.
+            blocks by minimizing the vertical displacements of all flows.
           'sorted':
             NOT IMPLEMENTED YET
         cluster_w_spacing: float, int (default=1)
@@ -1387,6 +1425,8 @@ class Alluvial:
         blockprops : dict, optional
           The properties used to draw the blocks. *blockprops* accepts the
           following specific keyword arguments:
+
+          - TODO
 
           Any further arguments provided are passed to
           `matplotlib.patches.PathPatch`.
@@ -1413,8 +1453,8 @@ class Alluvial:
           TODO: or this:
           %(Patch_kwdoc)s
 
-        flux_kwargs: dict (default={})
-          dictionary styling the :obj:`~matplotlib.patches.PathPatch` of fluxes.
+        flow_kwargs: dict (default={})
+          dictionary styling the :obj:`~matplotlib.patches.PathPatch` of flows.
 
           for a list of available options see
           :class:`~matplotlib.patches.PathPatch`
@@ -1423,17 +1463,17 @@ class Alluvial:
           -----
 
             Passing a string to `facecolor` and/or `edgecolor` allows to color
-            fluxes relative to the color of their source or target blocks.
+            flows relative to the color of their source or target blocks.
 
-            ``'source_cluster'`` or ``'target_cluster'``:
+            ``'source'`` or ``'target'``:
               will set the facecolor equal to the color of the respective block.
 
-              ``'cluster'`` *and* ``'source_cluster'`` *are equivalent.*
+              ``'cluster'`` *and* ``'source'`` *are equivalent.*
 
             ``'<cluster>_reside'`` or ``'<cluster>_migration'``:
               set the color based on whether source and target block have the
               same color or not. ``'<cluster>'`` should be either
-              ``'source_cluster'`` or ``'target_cluster'`` and determines the
+              ``'source'`` or ``'target'`` and determines the
               block from which the color is taken.
 
               **Examples:**
@@ -1507,8 +1547,8 @@ class Alluvial:
         # store the inputs
         self.y_pos = y_pos
         self.cluster_w_spacing = cluster_w_spacing
-        self._cluster_kwargs = blockprops
-        self._flux_kwargs = flux_kwargs
+        self._blockprops = blockprops
+        self._flow_kwargs = flow_kwargs
         self._label_kwargs = label_kwargs
 
         self._diagrams = []
@@ -1533,10 +1573,12 @@ class Alluvial:
             self._kwargs = _kwargs
             # draw a diagram if *flows* were provided
             if flows is not None or ext is not None:
-                sdargs, self._kwargs = SubDiagram.separate_kwargs(self._kwargs)
+                sdkw, self._kwargs = SubDiagram.separate_kwargs(
+                    self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          match_original=False, label=label, yoff=0,
-                         fractionflow=fractionflow, tags=tags, **sdargs)
+                         fractionflow=fractionflow, tags=tags,
+                         **sdkw)
                 self.finish()
 
         # # if blocks are given in a list of lists (each list is a x position)
@@ -1661,7 +1703,7 @@ class Alluvial:
         # # now draw
         # patch_collection = self.get_patchcollection(
         #     cluster_kwargs=self._cluster_kwargs,
-        #     flux_kwargs=self._flux_kwargs
+        #     flow_kwargs=self._flow_kwargs
         # )
         # self.ax.add_collection(patch_collection)
         # if self.with_cluster_labels:
@@ -1723,14 +1765,17 @@ class Alluvial:
         """Get all sub-diagrams."""
         return self._diagrams
 
-    def _create_columns(self, cinit, flows, ext, extout, fractionflows):
+    def _create_columns(self, cinit, flows, ext, extout, fractionflow):
+        """
+        Create the columns of an alluvial diagram.
+        """
         # create the columns
         columns = [cinit]
         if flows is not None:
             for flow, e in zip(flows, ext[1:]):
                 _col = e
                 if len(flow):
-                    if fractionflows:
+                    if fractionflow:
                         _flow = flow.dot(columns[-1])
                     else:
                         _flow = flow.sum(1)
@@ -1753,8 +1798,10 @@ class Alluvial:
         flows : sequence of array-like objects
             The flows between columns of the Alluvial diagram.
 
-            *flows[i]* determines the flow matrix from blocks in column
-            *i* to the blocks in column *i+1*.
+            *flows[i]* determines the flow matrix :math:`\mathbf{M}^i` from
+            blocks in column *i* to the blocks in column *i+1*. The entry
+            `\mathbf{M}^i_{k,l}` gives the amount that flows from block `l` in
+            column *i* to block `k` in column *i+1*.
 
             Note that an Alluvial diagram with M columns needs *flows* to be
             a sequence of M-1 array-like objects.
@@ -1850,8 +1897,8 @@ class Alluvial:
               \textbf{c}_{i+1} = \mathbf{F}_i\cdot\textbf{1}+\textbf{e}_{i+1},
 
           where :math:`\mathbf{F}_i` is the flow matrix of shape (P, N), given
-          by *flux[i]*, :math:`\textbf{1}` is a vector of ones of shape (N) and
-          :math:`\textbf{e}_{i+1}` is the external influx vector of shape (P),
+          by *flow[i]*, :math:`\textbf{1}` is a vector of ones of shape (N) and
+          :math:`\textbf{e}_{i+1}` is the external inflow vector of shape (P),
           given by *e[i+1]*.
         - *fractionflow* is True:
 
@@ -1862,14 +1909,15 @@ class Alluvial:
               \textbf{c}_{i+1}=\mathbf{F}_i\cdot\textbf{c}_i+\textbf{e}_{i+1},
 
           where :math:`\mathbf{F}_i` is the flow matrix of shape (P, N), given
-          by *flux[i]*, :math:`\textbf{c}_i` the vector of N block sizes in
-          column *i* and :math:`\textbf{e}_{i+1}` the external influx vector of
+          by *flow[i]*, :math:`\textbf{c}_i` the vector of N block sizes in
+          column *i* and :math:`\textbf{e}_{i+1}` the external inflow vector of
           shape (P) given by *e[i+1]*.
         """
+        _kwargs = dict(kwargs)
         # check the provided arguments
         # TODO: make sure empty flows are accepted
         flows = _to_valid_sequence(flows, 'flows')
-        if flows:
+        if flows is not None:
             nbr_cols = len(flows) + 1
         else:
             nbr_cols = None
@@ -1896,25 +1944,29 @@ class Alluvial:
                 # if no flows were provided
                 if nbr_cols is None:
                     nbr_cols = len(ext)
-                    flows = [[] for _ in range(nbr_cols)]
+                    flows = [[] for _ in range(nbr_cols - 1)]
             else:
                 cinit = ext[:]
                 if nbr_cols is None:
                     nbr_cols = 1
                 ext = np.zeros(nbr_cols)  # Note: we overwrite ext in this case
 
-        # TODO: handle the case where flows is not provided but ext
-
         columns = self._create_columns(cinit, flows, ext, extout,
                                        fractionflow)
+        # here we can process flows further before passing it to SubDiagram
+        # # but there is nothing further to do, it seems...
+
         if x is not None:
             x = _to_valid_sequence(x, 'x')
         else:
             # use default if not specified
             x = self._x or [i for i in range(len(columns))]
-        sdkw, otherkw = SubDiagram.separate_kwargs(kwargs)
-        diagram = SubDiagram(x=x, columns=columns, label=label, yoff=yoff,
-                             **sdkw)
+        # NOTE: add should anyways only accept kws for subdiagram
+        # sdkw, otherkw = SubDiagram.separate_kwargs(_kwargs)
+        _blockprops = _kwargs.pop('blockprops', self._blockprops)
+        diagram = SubDiagram(x=x, columns=columns, flows=flows,
+                             fractionflow=fractionflow, label=label,
+                             yoff=yoff, blockprops=_blockprops, **_kwargs)
         # add the new subdiagram
         # get the x coordinates
         # TODO: cannot pass columns here. columns are a list of list[float]
@@ -1929,8 +1981,8 @@ class Alluvial:
         # # Define the cluster sizes per snapshot
         # # at each time point {cluster_id: cluster_size})
         # cluster_sizes = [{0: 3}, {0: 5}, {0: 3, 1: 2}, {0: 5}, {0: 4}]
-        # # Define the membership fluxes between neighbouring clusterings
-        # between_fluxes = [
+        # # Define the membership flows between neighbouring clusterings
+        # between_flows = [
         #     {(0, 0): 3},  # key: (from cluster, to cluster), value: size
         #     {(0, 0): 3, (0, 1): 2},
         #     {(0, 0): 3, (1, 0): 2},
@@ -1949,15 +2001,15 @@ class Alluvial:
         #             facecolor=cluster_color[cid],
         #         ) for cid in clustering
         #     ]
-        # # now create the fluxes between the clusters
+        # # now create the flows between the clusters
         # for tidx, tp in enumerate(time_points[1:]):
-        #     fluxes = between_fluxes[tidx]
-        #     for from_csid, to_csid in fluxes:
+        #     flows = between_flows[tidx]
+        #     for from_csid, to_csid in flows:
         #         _Flow(
-        #             flux=fluxes[(from_csid, to_csid)],
-        #             source_cluster=clustering_sequence[time_points[tidx]][from_csid],
-        #             target_cluster=clustering_sequence[tp][to_csid],
-        #             facecolor='source_cluster'
+        #             flow=flows[(from_csid, to_csid)],
+        #             source=clustering_sequence[time_points[tidx]][from_csid],
+        #             target=clustering_sequence[tp][to_csid],
+        #             facecolor='source'
         #         )
 
     def _add_diagram(self, diagram):
@@ -2060,33 +2112,33 @@ class Alluvial:
 
     def _move_new_clusters(self, x_pos):
         r"""
-        This method redistributes fluxes without in-flux so to minimize the
-        vertical displacement of out-fluxes.
+        This method redistributes flows without in-flow so to minimize the
+        vertical displacement of out-flows.
 
         Parameters
         -----------
         x_pos: float
-          The horizontal position where new clusters without in-flux should be
+          The horizontal position where new clusters without in-flow should be
           distributed. This must be a `key` of the
           :attr:`~.Alluvial.clusters` attribute.
 
         Once the clusters are distributed for all x positions this method
         redistributes within a given x_positions the clusters that have no
-        influx but out fluxes. The clusters are moved closer (vertically) to
-        the target clusters of the out flux(es).
+        inflow but out flows. The clusters are moved closer (vertically) to
+        the target clusters of the out flow(es).
         """
         old_mid_heights = [
             cluster.mid_height for cluster in self.clusters[x_pos]
         ]
         _redistribute = False
         for cluster in self.clusters[x_pos]:
-            if sum([_flow.flux_width for _flow in cluster.inflows]) == 0.0:
+            if sum([_flow.flow_width for _flow in cluster.inflows]) == 0.0:
                 weights = []
                 positions = []
-                for out_flux in cluster.outflows:
-                    if out_flux.target_cluster is not None:
-                        weights.append(out_flux.flux_width)
-                        positions.append(out_flux.target_cluster.mid_height)
+                for out_flow in cluster.outflows:
+                    if out_flow.target is not None:
+                        weights.append(out_flow.flow_width)
+                        positions.append(out_flow.target.mid_height)
                 if sum(weights) > 0.0:
                     _redistribute = True
                     cluster.mid_height = sum(
@@ -2114,7 +2166,7 @@ class Alluvial:
     def get_patchcollection(
         self, match_original=True,
         cluster_kwargs={},
-        flux_kwargs={},
+        flow_kwargs={},
         *args, **kwargs
     ):
         """
@@ -2126,11 +2178,11 @@ class Alluvial:
             Options:
         """
         cluster_patches = []
-        fluxes = []
+        flows = []
         if cluster_kwargs is None:
             cluster_kwargs = dict()
         for x_pos in self.x_positions:
-            out_fluxes = []
+            out_flows = []
             for cluster in self.clusters[x_pos]:
                 # TODO: set color
                 # _cluster_color
@@ -2140,20 +2192,20 @@ class Alluvial:
                         **cluster_kwargs
                     )
                 )
-                # sort the fluxes for minimal overlap
-                cluster.set_loc_out_fluxes()
-                cluster.sort_in_fluxes()
-                cluster.sort_out_fluxes()
-                cluster.set_anchor_in_fluxes()
-                cluster.set_anchor_out_fluxes()
-                out_fluxes.extend(cluster.outflows)
-            fluxes.append(out_fluxes)
-        flux_patches = []
-        for out_fluxes in fluxes:
-            for out_flux in out_fluxes:
-                flux_patches.append(out_flux.get_patch(**flux_kwargs))
+                # sort the flows for minimal overlap
+                cluster.set_loc_out_flows()
+                cluster.sort_in_flows()
+                cluster.sort_out_flows()
+                cluster.set_anchor_in_flows()
+                cluster.set_anchor_out_flows()
+                out_flows.extend(cluster.outflows)
+            flows.append(out_flows)
+        flow_patches = []
+        for out_flows in flows:
+            for out_flow in out_flows:
+                flow_patches.append(out_flow.get_patch(**flow_kwargs))
         all_patches = []
-        all_patches.extend(flux_patches)
+        all_patches.extend(flow_patches)
         all_patches.extend(cluster_patches)
         return PatchCollection(
             all_patches,

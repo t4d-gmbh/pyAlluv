@@ -37,7 +37,7 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
 @pytest.mark.parametrize(
     'flows, ext, fractionflow, columns, layout', test_data, ids=test_ids
 )
-class TestAlluivial:
+class TestAlluvial:
     def _test_block_ordering(self, alluvial_collumns, ref_columns, layout):
         # test whether the resulting block ordering in each column reflects
         # the chosen layout (only 'top' and 'bottom')
@@ -71,7 +71,24 @@ class TestAlluivial:
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
                      layout=layout)
         alluvial.finish()
+        # TODO: ordering might not really what is to test here
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
+                                  columns, layout=layout)
+
+    def test_multiple_subdiagrams(self, ext, flows, fractionflow, columns,
+                                  layout):
+        # dev-test
+        # several sub diagrams with add and finish
+        alluvial = Alluvial()
+        alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
+                     layout=layout)
+        alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow, yoff=2,
+                     layout=layout)
+        alluvial.finish()
+        # TODO: ordering might not really what is to test here
+        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
+                                  columns, layout=layout)
+        self._test_block_ordering(alluvial.get_diagrams()[1].get_columns(),
                                   columns, layout=layout)
 
 

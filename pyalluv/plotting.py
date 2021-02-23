@@ -48,11 +48,142 @@ def _to_valid_sequence(data, attribute):
         return data
 
 
-def _update_notNone(dict_to_update, new_dict):
-    """Use values from new_dict if they are not None"""
-    dict_to_update.update({k: v
-                           for k, v in new_dict.items()
-                           if v is not None})
+# Note: could also be AlluvialArtistProxy
+class _ArtistProxy:
+    """
+    Proxy class for `Artist` subclasses used to draw the various element in an
+    alluvial diagram.
+
+    This class assembles the common properties and relation to :class:`Patch`
+    of the elements present in an Alluvial diagram.
+    """
+    _artistcls = None  # derived must overwrite
+    _alias_map = getattr(_artistcls, "_alias_map", {})
+    _sty_reduce_alias = {alias: p for p, aliases in _alias_map.items()
+                         for alias in aliases}
+
+    def __init__(self, label=None, **kwargs):
+        """
+        """
+        self.stale = True
+        self._tags = []
+        self._artist = None
+        self._kwargs = kwargs
+
+    def set_tags(self, tags: list):
+        """Set a tag for the block."""
+        self._tags = tags
+
+    def get_tags(self):
+        return self._tags
+
+    def add_tag(self, tag):
+        if tag not in self._tags:
+            self._tags.append(tag)
+
+    def remove_tag(self, tag):
+        if tag in self._tags:
+            self._tags.remove(tag)
+
+    # TODO: not sure if needed
+    tags = property(get_tags, set_tags)
+
+    @property
+    def is_tagged(self):
+        """Indicate whether a block belongs to a tag or not."""
+        return True if len(self._tags) else False
+
+    def set_styling(self, props):
+        """Set the styling of the element."""
+
+        self._original_kwargs = dict(props)
+        self._kwargs = {self._sty_reduce_alias.get(k, k): v
+                        for k, v in props.items()}
+
+    def get_styling(self, original=False):
+        """Return the custom styling properties of this element."""
+        if original:
+            return self._original_kwargs
+        else:
+            return self._kwargs
+
+    def get_styling_prop(self, prop: str, altval=None):
+        """
+        Return the value of a specific styling property.
+
+        If the property is not set *altval* is returned instead.
+
+        Parameters
+        ----------
+        prop : str
+            The name of the property to fetch.
+        altval : Any (default: None)
+            The value to return in case the element has no styling property
+            with the name provided in *prop*.
+
+        """
+        # OLD:
+        # return self._kwargs.get(prop, self._original_kwargs.get(prop, altval))
+        # if prop in self._kwargs get it
+        _prop = self._sty_reduce_alias.get(prop, prop)
+        if _prop in self._kwargs:
+            return self._kwarg[_prop]
+        # if not but there are tags, get it from the tags
+        # TODO: check if the prop is present in any of self._tags
+        # if not in tags or no tags return altval
+        return altval
+
+    @property
+    def is_styled(self,):
+        """Indicate if this element has custom styling."""
+        return True if self.is_tagged or self._kwargs else False
+
+    def _create_artist(self, **kwargs):
+        """Initiate the patch."""
+        raise NotImplementedError('Derived must override')
+
+    def create_artist(self, **kwargs):
+        """
+        Create the patch (or collection) for this element and return whether
+        the element has individual styling or not.
+        """
+        _kwargs = self._update_styling(kwargs)
+        self._create_artist(**_kwargs)
+        self.stale = False
+
+    def get_artist(self,):
+        # self.set_path(self.create_path())
+        # return patches.PathPatch(
+        #     self.get_path(),
+        #     **_kwargs
+        # )
+        # TODO: set stale=True in setter fcts
+        if self.stale:
+            raise ValueError("The artist has not been created.")
+        return self._artist
+
+    def _update_styling(self, props: dict):
+        """
+        Update styling properties with the styling properties attached to this
+        element.
+
+        Parameters
+        ----------
+        props : dict
+            The dictionary that will be updated in place with *self._kwargs*.
+
+        Returns
+        -------
+        updated_props : dict
+            A copy of *props* updated with *self._kwargs*.
+        """
+        # get rid of aliases in the provided props
+        _props = {self._sty_reduce_alias.get(k, k): v for k, v
+                  in props.items()}
+        # new_props = {self._sty_reduce_alias.get(k, k): v
+        #              for k, v in self._kwargs.items() if v is not None}
+        _props.update(self._kwargs)
+        return _props
 
 
 @cbook._define_aliases({
@@ -61,7 +192,7 @@ def _update_notNone(dict_to_update, new_dict):
     "width": ["w"],
     "height": ["h"]
 })
-class _Block:
+class _Block(_ArtistProxy):
     """
     A Block in an Alluvial diagram.
 
@@ -71,6 +202,9 @@ class _Block:
     `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
 
     """
+    # set the artist subclass to use
+    _artistcls = Rectangle
+
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
     def __init__(self, height, xa=None, ya=None, width=1.0, label=None,
@@ -108,6 +242,8 @@ class _Block:
           %(Patch_kwdoc)s
 
         """
+        super().__init__(label=label, **kwargs)
+
         # TODO: only keep what's in else:
         if isinstance(height, (list, tuple)):
             self._height = len(height)
@@ -128,12 +264,6 @@ class _Block:
         self.pathprops = pathprops or dict()
         self.in_margin = {'bottom': 0, 'top': 0}
         self.out_margin = {'bottom': 0, 'top': 0}
-        self._kwargs = kwargs
-        self._patch = None
-        # TODO: if position or styling changes, set to true so to redraw the
-        # patch, in get_patch if stale is True, redraw the patch before
-        # returning it.
-        self._stale = True
 
     def get_xa(self):
         """Return the x coordinate of the anchor point."""
@@ -173,10 +303,6 @@ class _Block:
             y0 -= self._height
         return y0
 
-    def get_tag(self):
-        """Return the tag of the block."""
-        return self._tag
-
     def get_xy(self):
         """Return the left and bottom coords of the block as a tuple."""
         return self.get_x(), self.get_y()
@@ -201,10 +327,6 @@ class _Block:
     def get_inflows(self):
         """Return a list of incoming `._Flows`."""
         return self._inflows
-
-    def set_tag(self, tag: int):
-        """Set a tag for the block."""
-        self._tag = tag
 
     def set_xa(self, xa):
         """Set the x coordinate of the anchor point."""
@@ -318,12 +440,6 @@ class _Block:
     outflows = property(get_outflows, set_outflows, doc="List of `._Flow`"
                                                         "objects leaving the"
                                                         "block.")
-    tag = property(get_tag, set_tag)
-
-    @property
-    def is_tagged(self):
-        """Indicate whether a block belongs to a tag or not."""
-        return True if self._tag is not None else False
 
     def add_outflow(self, outflow):
         self._outflows.append(outflow)
@@ -408,29 +524,16 @@ class _Block:
     #     doc="y coordinate of the block's center."
     # )
 
-    def create_patch(self, **kwargs):
-        _kwargs = dict(kwargs)
-        _update_notNone(_kwargs, self._kwargs)
-        self._patch = Rectangle(self.get_xy(), self._width, self._height,
-                                **_kwargs)
-        return self._patch
-
-    def get_patch(self,):
-        # self.set_path(self.create_path())
-        # return patches.PathPatch(
-        #     self.get_path(),
-        #     **_kwargs
-        # )
-        # TODO: set stale=True in setter fcts
-        if self._stale:
-            self.create_patch()
-            self._stale = False
-        return self._patch
+    def _create_artist(self, **kwargs):
+        """Blocks use :class:`patches.Rectangle` as their patch."""
+        # TODO: maybe use the more generic _artist?
+        self._artist = self._artistcls(self.get_xy(), self._width,
+                                       self._height, **kwargs)
 
     def update_locations(self,):
-        # TODO: this needs to be called AFTER self._patch has been attached to
+        # TODO: this needs to be called AFTER self._artist has been attached to
         # an axis
-        x0, y0, x1, y1 = self._patch._convert_units()
+        x0, y0, x1, y1 = self._artist._convert_units()
         # Use x0, y0, x1, y1 to set outloc and inloc
         self._set_outloc()
         self._set_inloc()
@@ -857,9 +960,11 @@ class _Flow:
         # return flow_patch
         self._patch = patches.PathPatch(_path, **_kwargs)
 
+    # TODO: ideally setting ec and fc should not happen in this class, only
+    # special colors should be converted
     def set_edgecolor(self, color):
         if color in ['source', 'target', 's', 't', 'interpolate']:
-            # get the color form source or target 
+            # get the color form source or target
             # or
             # make this flux use a patchcollection with a linearsegment cmap
             pass
@@ -877,11 +982,13 @@ class _Flow:
         return self._patch
 
 
-class BlockCollection:
+class BlockCollection(_ArtistProxy):
     """
     A collection of Blocks with common styling properties.
     """
-    def __init__(self, blocks, label=None, match_original=False, **kwargs):
+    _artistcls = PatchCollection
+
+    def __init__(self, blocks, label=None, **kwargs):
         """
         Parameters
         ----------
@@ -890,45 +997,49 @@ class BlockCollection:
         label : str, optional
             Label of the collection.
         """
-        # TODO: make sure that blocks is correct
-        self._blocks = blocks
-        self._label = label
-        self._kwargs = kwargs
-        self.stale = True
-
-        # ###
-        # Below is from SubDiagram.__init__
-
-        # TODO: This is back from when it was a subclass of collection > used??
-        if match_original:
-            def determine_facecolor(block):
-                # TODO: Block does not have a get_fill, right?
-                if block.get_fill():
-                    return block.get_facecolor()
-                return [0, 0, 0, 0]
-            kwargs['facecolors'] = [determine_facecolor(b) for b in self._blocks]
-            kwargs['edgecolors'] = [b.get_edgecolor() for b in self._blocks]
-            kwargs['linewidths'] = [b.get_linewidth() for b in self._blocks]
-            kwargs['linestyles'] = [b.get_linestyle() for b in self._blocks]
-            kwargs['antialiaseds'] = [b.get_antialiased() for b in self._blocks]
         # get cmap data:
         self._cmap_data = kwargs.pop('cmap_array', None)
         if self._cmap_data is not None:
             # TODO: allow either a block property, x, or custom array
             self._cmap_data = 'x'
 
-        # super().__init__(label=label, **kwargs)
-        # TODO: when should this be called? Why not here already?
-        # self.set_paths(self._columns)
-        self._kwargs = kwargs
-        self._collection = None
+        super().__init__(label=label, **kwargs)
+
+        # TODO: make sure that blocks is correct
+        self._blocks = blocks
+
+        # ###
+        # Below is from SubDiagram.__init__
+
+        # # TODO: This is back from when it was a subclass of collection > used??
+        # if match_original:
+        #     def determine_facecolor(block):
+        #         # TODO: Block does not have a get_fill, right?
+        #         if block.get_fill():
+        #             return block.get_facecolor()
+        #         return [0, 0, 0, 0]
+        #     kwargs['facecolors'] = [determine_facecolor(b) for b in self._blocks]
+        #     kwargs['edgecolors'] = [b.get_edgecolor() for b in self._blocks]
+        #     kwargs['linewidths'] = [b.get_linewidth() for b in self._blocks]
+        #     kwargs['linestyles'] = [b.get_linestyle() for b in self._blocks]
+        #     kwargs['antialiaseds'] = [b.get_antialiased() for b in self._blocks]
+
         # TODO: below attributes need to be handled
         self._redistribute_vertically = 4
         self.y_min, self.y_max = None, None
 
         # ###
 
-    def create_collection(self, match_original=False, **kwargs):
+    def to_element_styling(self, styleprops: dict):
+        """
+        Convert the styling properties to lists matching self._blocks.
+        """
+        indiv_props = dict()
+        for k, v in styleprops.items():
+            indiv_props[k] = [b.get_styling_prop(k, v) for b in self._blocks]
+        return indiv_props
+
+    def _create_artist(self, **kwargs):
         """
         Creates `.PatchCollections`s for the blocks in this collection.
 
@@ -936,24 +1047,30 @@ class BlockCollection:
         ----------
 
         """
-        _kwargs = dict(kwargs)
-        _kwargs.update(self._kwargs)
-        # for col_id in range(self._nbr_columns):
-        #     for block in self._columns[col_id]:
+        # remove the cmap as this will not fly with block.create_artist
+        cmap = kwargs.pop('cmap', None)
         for block in self._blocks:
             # do not allow to pass kws to patch here.
-            # block.create_patch(**_kwargs)
-            block.create_patch()
-        self._collection = PatchCollection(
-            [block.get_patch()
+            # block.create_artist(**_kwargs)
+            # TODO: if block has no other tag
+            block.create_artist(**kwargs)
+        match_original = False
+        if any(block.is_styled for block in self._blocks):
+            match_original = True
+        if match_original:
+            kwargs = self.to_element_styling(kwargs)
+
+        self._artist = self._artistcls(
+            [block.get_artist()
              for block in self._blocks],
             # for column in self._columns
             # for block in column],
+            cmap=cmap,
             match_original=match_original,
-            **_kwargs
+            **kwargs
         )
         if self._cmap_data is not None:
-            self._collection.set_array(
+            self._artist.set_array(
                 np.asarray([getattr(block, self._cmap_data)
                             for block in self._blocks]))
             # np.asarray([getattr(block, self._cmap_data)
@@ -963,9 +1080,16 @@ class BlockCollection:
         # ###
         # TODO: Draw the flows
         # ###
+        # now the flows
+        # self._flow_collection = PatchCollection([flow.get_patch()
+        #                                          for flow in self._flows])
 
-    def get_collection(self):
-        return self._collection
+    # NOTE: this is in _AlluvialElement
+    # def create_patch(self, match_original=False, **kwargs):
+    #     _kwargs = dict(kwargs)
+    #     _kwargs.update(self._kwargs)
+    #     # for col_id in range(self._nbr_columns):
+    #     #     for block in self._columns[col_id]:
 
     def add_block(self, block):
         """Add a Block."""
@@ -1010,7 +1134,7 @@ class SubDiagram(BlockCollection):
 
     """
     # def __init__(self, patches, match_original=False, **kwargs):
-    def __init__(self, x, columns, flows, fractionflow, match_original=False,
+    def __init__(self, x, columns, flows, fractionflow,
                  label=None, yoff=0, hspace=1, hspace_combine='add',
                  label_margin=(0, 0), layout='centered', blockprops=None,
                  **kwargs):
@@ -1027,11 +1151,6 @@ class SubDiagram(BlockCollection):
             the size of a block.
         flows : sequence of array_like objects
             ... *TODO*
-        match_original : bool, (default=False)
-            If True, use the colors and linewidths of the original
-            patches.  If False, new colors may be assigned by
-            providing the standard collection arguments, facecolor,
-            edgecolor, linewidths, norm or cmap.
         label : str, optional
             Label of the diagram.
         yoff : int or float, default: 0
@@ -1091,36 +1210,30 @@ class SubDiagram(BlockCollection):
                     _provided_blocks = True
                 break
         _blocks = []
+        self._columns = []
         if _provided_blocks:
             for col in columns:
                 # self._columns.append([])
                 # self._columns.extend([i for i in
                 #                       range(b_id, newb_id)])
-                _blocks.extend(list(col))
+                column = list(col)
+                _blocks.extend(column)
+                self._columns.append(column)
             # self._columns = [list(col) for col in columns]
         else:
             for xi, col in zip(x, columns):
-                _blocks.extend([_Block(size, xa=xi, **self._blockprops)
-                                for size in col])
+                column = [_Block(size, xa=xi, **self._blockprops)
+                          for size in col]
+                self._columns.append(column)
+                _blocks.extend(column)
                 # self._columns.append([_Block(size, xa=xi, **self._blockprops)
                 #                       for size in column])
                 # self._columns.append([_Block(size, xa=xi,
                 #                      **kwargs) for size in column])
+        self._nbr_columns = len(self._columns)
 
         # TODO: determine what other arguments need to go to super
-        super().__init__(blocks=_blocks, label=label,
-                         match_original=match_original, **kwargs)
-
-        # further SubDiagram specific properties
-        # construct the column structure
-        b_id = 0
-        # columns just holds the index of blocks in _blocks
-        self._columns = []
-        for col in columns:
-            newb_id = b_id + len(col)
-            self._columns.append([i for i in range(b_id, newb_id)])
-            b_id = newb_id
-        self._nbr_columns = len(self._columns)
+        super().__init__(blocks=_blocks, label=label, **kwargs)
 
         # create the Flows is only based on *flows* and *extout*'s
         self._flows = []
@@ -1135,8 +1248,8 @@ class SubDiagram(BlockCollection):
                 for j, f in enumerate(row):
                     # j is the index of the source block
                     # TODO: pass kwargs?
-                    _flows.append(_Flow(flow=f, source=self._blocks[s_col[j]],
-                                        target=self._blocks[t_col[i]],
+                    _flows.append(_Flow(flow=f, source=s_col[j],
+                                        target=t_col[i],
                                         relative_flow=fractionflow))
             self._flows.append(_flows)
 
@@ -1199,8 +1312,8 @@ class SubDiagram(BlockCollection):
         """Add a Block to a column."""
         # add the block to the blocks
         super().add_block(block)
-        # add its index to the column
-        self._columns[column].append(len(self._blocks) - 1)
+        # add the block to _columns
+        self._columns[column].append(block)
 
     def add_flow(self, column, flow):
         # TODO: _columns can only contain indices for blocks
@@ -1235,110 +1348,44 @@ class SubDiagram(BlockCollection):
         col_hspace = self.get_column_hspace(col_id)
         if nbr_blocks:
             # sort clusters according to height
-            new_ordering, _column = zip(
+            ordering, _column = zip(
                 *sorted(enumerate(self._columns[col_id]),
-                        key=lambda x: self._blocks[x[1]].get_height())
+                        key=lambda x: x[1].get_height())
             )
             if layout == 'top':
-                self._update_ycoords(_column, col_hspace, layout)
                 # TODO: do the reordering outside if/elif/else (after)
-                self._reorder_column(col_id, new_ordering)
+                self._reorder_column(col_id, ordering)
+                self._update_ycoords(col_id, col_hspace, layout)
             elif layout == 'bottom':
-                _column = _column[::-1]
-                new_ordering = new_ordering[::-1]
-                self._update_ycoords(_column, col_hspace, layout)
-                self._reorder_column(col_id, new_ordering)
+                ordering = ordering[::-1]
+                self._reorder_column(col_id, ordering)
+                self._update_ycoords(col_id, col_hspace, layout)
             # in both cases no further sorting is needed
             if layout == 'centered':
                 # sort so to put biggest height in the middle
                 # self._columns[col_id] = _column[::-2][::-1] + \
                 #     _column[nbr_blocks % 2::2][::-1]
-                _column = _column[::-2][::-1] + \
-                    _column[nbr_blocks % 2::2][::-1]
+                ordering = ordering[::-2][::-1] + \
+                    ordering[nbr_blocks % 2::2][::-1]
+                # update the ordering
+                self._reorder_column(col_id, ordering)
                 # set positioning
-                self._update_ycoords(_column, col_hspace, layout)
-                # now sort again considering the flows.
-                old_mid_heights = [block.get_yc() for block in _column]
-                # do the redistribution a certain amount of times
-                _redistribute = False
-                for _ in range(self._redistribute_vertically):
-                    # TODO: check this as soon as Flows are set-up correctly
-                    for block in _column:
-                        weights = []
-                        positions = []
-                        for in_flow in block.inflows:
-                            if in_flow.source is not None:
-                                weights.append(in_flow.flow_width)
-                                positions.append(in_flow.source.get_yc())
-                        if sum(weights) > 0.0:
-                            _redistribute = True
-                            block.set_yc(sum([
-                                weights[i] * positions[i]
-                                for i in range(len(weights))
-                            ]) / sum(weights))
-                    if _redistribute:
-                        sort_key = [bisect_left(old_mid_heights, col.get_yc())
-                                    for col in _column]
-                        cs, _sort_key = zip(
-                            *sorted(
-                                zip(
-                                    list(range(nbr_blocks)),
-                                    sort_key,
-                                ),
-                                key=lambda x: x[1]
-                            )
-                        )
-                        self._reorder_column(col_id, ordering=cs)
-                        # self._columns[col_id] = [
-                        #     _column[_k] for _k in cs
-                        # ]
-
-                        # redistribute them
-                        self._update_ycoords(_column, col_hspace, layout)
-                        old_mid_heights = [self._blocks[bid].get_yc()
-                                           for bid in self._columns[col_id]]
-                    else:
-                        break
-                # perform pairwise swapping for backwards flows
-                _column = self._columns[col_id]
-                for _ in range(int(0.5 * nbr_blocks)):
-                    for i in range(1, nbr_blocks):
-                        bid1 = _column[i - 1]
-                        bid2 = _column[i]
-                        b1 = self._blocks[bid1]
-                        b2 = self._blocks[bid2]
-                        if self._swap_clusters(bid1, bid2, col_hspace,
-                                               'backwards'):
-                            b2.set_y(b1.get_y())
-                            b1.set_y(
-                                b2.get_y() + b2.get_height() + col_hspace
-                            )
-                            # TODO: what was this used for?
-                            # self.clusters[x_pos][i - 1] = b2
-                            # self.clusters[x_pos][i] = b1
-                for _ in range(int(0.5 * nbr_blocks)):
-                    for i in range(1, nbr_blocks):
-                        bid1 = _column[nbr_blocks - i - 1]
-                        bid2 = _column[nbr_blocks - i]
-                        b1 = self._blocks[bid1]
-                        b2 = self._blocks[bid2]
-                        if self._swap_clusters(bid1, bid2, col_hspace,
-                                               'backwards'):
-                            b2.set_y(b1.get_y())
-                            b1.set_y(
-                                b2.get_y() + b2.get_height() + col_hspace
-                            )
-                            self._columns[col_id][nbr_blocks - i - 1] = bid2
-                            self._columns[col_id][nbr_blocks - i] = bid1
+                self._update_ycoords(col_id, col_hspace, layout)
+                # ###
+                # TODO: both methods below need to be checked
+                # # now sort again considering the flows.
+                # self._decrease_flow_distances(col_id)
+                # # perform pairwise swapping for backwards flows
+                # self._pairwise_swapping(col_id)
 
                 # TODO: bad implementation, avoid duplicated get_y call
                 _min_y = min(
                     self._columns[col_id],
-                    key=lambda x: self._blocks[x].get_y()
+                    key=lambda x: x.get_y()
                 ).get_y() - 2 * col_hspace
                 _max_y_cluster = max(
                     self._columns[col_id],
-                    key=lambda x: self._blocks[x].get_y() + x.get_height()
+                    key=lambda x: x.get_y() + x.get_height()
                 )
                 _max_y = _max_y_cluster.get_y() + \
                     _max_y_cluster.get_height() + 2 * col_hspace
@@ -1351,15 +1398,83 @@ class SubDiagram(BlockCollection):
                     _max_y
                 ) if self.y_max is not None else _max_y
 
-    def create_collection(self, match_original=False, **kwargs):
-        """
-        """
-        # first for the bocks
-        super().create_collection(match_original=match_origina, **kwargs)
-        # now the flows
-        self._flow_collection = PatchCollection([flow.get_patch()
-                                                 for flow in self._flows])
+    def _decrease_flow_distances(self, col_id):
+        _column = self._columns[col_id]
+        # TODO: does not really make sense to recompute them here
+        nbr_blocks = len(_column)
+        layout = self.get_column_layout(col_id)
+        col_hspace = self.get_column_hspace(col_id)
+        old_mid_heights = [block.get_yc() for block in _column]
+        # do the redistribution a certain amount of times
+        _redistribute = False
+        for _ in range(self._redistribute_vertically):
+            # TODO: check this as soon as Flows are set-up correctly
+            for block in _column:
+                weights = []
+                positions = []
+                for in_flow in block.inflows:
+                    if in_flow.source is not None:
+                        weights.append(in_flow.flow_width)
+                        positions.append(in_flow.source.get_yc())
+                if sum(weights) > 0.0:
+                    _redistribute = True
+                    block.set_yc(sum([
+                        weights[i] * positions[i]
+                        for i in range(len(weights))
+                    ]) / sum(weights))
+            if _redistribute:
+                sort_key = [bisect_left(old_mid_heights, col.get_yc())
+                            for col in _column]
+                cs, _sort_key = zip(
+                    *sorted(
+                        zip(
+                            list(range(nbr_blocks)),
+                            sort_key,
+                        ),
+                        key=lambda x: x[1]
+                    )
+                )
+                self._reorder_column(col_id, ordering=cs)
+                # self._columns[col_id] = [
+                #     _column[_k] for _k in cs
+                # ]
 
+                # redistribute them
+                self._update_ycoords(col_id, col_hspace, layout)
+                old_mid_heights = [block.get_yc()
+                                   for block in self._columns[col_id]]
+            else:
+                break
+
+    def _pairwise_swapping(self, col_id):
+        _column = self._columns[col_id]
+        # TODO: does not really make sense to recompute them here
+        nbr_blocks = len(_column)
+        col_hspace = self.get_column_hspace(col_id)
+        for _ in range(int(0.5 * nbr_blocks)):
+            for i in range(1, nbr_blocks):
+                b1 = _column[i - 1]
+                b2 = _column[i]
+                if self._swap_clusters((b1, b2), col_hspace,
+                                       'backwards'):
+                    b2.set_y(b1.get_y())
+                    b1.set_y(
+                        b2.get_y() + b2.get_height() + col_hspace
+                    )
+                    _column[i - 1] = b2
+                    _column[i] = b1
+        for _ in range(int(0.5 * nbr_blocks)):
+            for i in range(1, nbr_blocks):
+                b1 = _column[nbr_blocks - i - 1]
+                b2 = _column[nbr_blocks - i]
+                if self._swap_clusters((b1, b2), col_hspace,
+                                       'backwards'):
+                    b2.set_y(b1.get_y())
+                    b1.set_y(
+                        b2.get_y() + b2.get_height() + col_hspace
+                    )
+                    self._columns[col_id][nbr_blocks - i - 1] = b2
+                    self._columns[col_id][nbr_blocks - i] = b1
 
     def _reorder_column(self, col_id, ordering):
         """Update the ordering of blocks in a column"""
@@ -1367,7 +1482,7 @@ class SubDiagram(BlockCollection):
         self._columns[col_id] = [_column[newid] for newid in ordering]
 
     # NOTE: almost indep on self
-    def _update_ycoords(self, column, hspace, layout):
+    def _update_ycoords(self, column: int, hspace, layout):
         """
         Update the y coordinate of the blocks in a column based on the
         diagrams vertical offset, the layout chosen for this column and the
@@ -1375,19 +1490,18 @@ class SubDiagram(BlockCollection):
 
         Parameters
         ----------
-        column : list[int]
-            The list of block indices that are in this column
+        column : int
+            Index of the column to reorder.
         """
-        _blocks = [self._blocks[i]
-                   for i in column]
         displace = self._yoff
-        for block in _blocks:
+        _column = self._columns[column]
+        for block in _column:
             block.set_y(displace)
             displace += block.get_height() + hspace
         # now offset to center
-        low = _blocks[0].get_y()  # this is just self._yoff
+        low = _column[0].get_y()  # this is just self._yoff
         # this is just `displace`:
-        high = _blocks[-1].get_y() + _blocks[-1].get_height()
+        high = _column[-1].get_y() + _column[-1].get_height()
         if layout == 'centered':
             cent_offset = low + 0.5 * (high - low)
             # _h_clusters = 0.5 * len(clusters)
@@ -1395,20 +1509,20 @@ class SubDiagram(BlockCollection):
             #     if _h_clusters.is_integer() \
             #     else int(_h_clusters)
             # cent_offest = clusters[cent_idx].mid_height
-            for block in _blocks:
+            for block in _column:
                 block.set_y(block.get_y() - cent_offset)
         elif layout == 'top':
-            for block in _blocks:
+            for block in _column:
                 block.set_y(block.get_y() - high)
 
-    def _swap_clusters(self, bid1, bid2, hspace, direction='backwards'):
+    def _swap_clusters(self, blocks, hspace, direction='backwards'):
         """
         Check if swapping to blocks leads to shorter vertical flow distances.
         """
-        _blocks = [self._blocks[bid] for bid in (bid1, bid2)]
+        # _blocks = [self._blocks[bid] for bid in (bid1, bid2)]
         squared_diff = {}
 
-        for block in _blocks:
+        for block in blocks:
             weights = []
             sqdiff = []
             if direction in ['both', 'backwards']:
@@ -1434,12 +1548,17 @@ class SubDiagram(BlockCollection):
         # TODO: check why this assert statement fails
         # print(n1.get_y(), n2.get_y())
         # assert n1.get_y() < n2.get_y()
-        inv_mid_height = {
-            bid1: _blocks[0].get_y() + _blocks[1].get_height() + hspace + 0.5 * _blocks[0].get_height(),
-            bid2: _blocks[0].get_y() + 0.5 * _blocks[1].get_height()
-        }
+        # TODO: Cannot recreate the thought process behind this...
+        inv_mid_height = [
+            blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
+            blocks[0].get_y() + 0.5 * blocks[1].get_height()
+        ]
+        # inv_mid_height = {
+        #     bid1: blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
+        #     bid2: blocks[0].get_y() + 0.5 * blocks[1].get_height()
+        # }
         squared_diff_inf = {}
-        for block in _blocks:
+        for i, block in enumerate(blocks):
             weights = []
             sqdiff = []
             if direction in ['both', 'backwards']:
@@ -1447,14 +1566,14 @@ class SubDiagram(BlockCollection):
                     if flow.source is not None:
                         weights.append(flow.flow_width)
                         sqdiff.append(abs(
-                            inv_mid_height[block] - flow.source.get_yc()
+                            inv_mid_height[i] - flow.source.get_yc()
                         ))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
                     if flow.target is not None:
                         weights.append(flow.flow_width)
                         sqdiff.append(
-                            abs(inv_mid_height[block] - flow.target.get_yc())
+                            abs(inv_mid_height[i] - flow.target.get_yc())
                         )
             if sum(weights) > 0.0:
                 squared_diff_inf[block] = sum([
@@ -1714,7 +1833,7 @@ class Alluvial:
                 sdkw, self._kwargs = SubDiagram.separate_kwargs(
                     self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
-                         match_original=False, label=label, yoff=0,
+                         label=label, yoff=0,
                          fractionflow=fractionflow, tags=tags,
                          **sdkw)
                 self.finish()
@@ -2161,8 +2280,8 @@ class Alluvial:
             # create a PatchCollection out of all non-tagged blocks
             diag_zorder = 4
             diagram.determine_layout()
-            diagram.create_collection(zorder=diag_zorder, **self._kwargs)
-            self.ax.add_collection(diagram.get_collection())
+            diagram.create_artist(zorder=diag_zorder, **self._kwargs)
+            self.ax.add_collection(diagram.get_artist())
         for tag in self._tags:
             # creat a PatchCollection for each tag
             # tag_zorder = 5
@@ -2328,7 +2447,7 @@ class Alluvial:
                 # _cluster_color
                 cluster.set_y(cluster.get_y() + self.y_offset)
                 cluster_patches.append(
-                    cluster.get_patch(
+                    cluster.get_artist(
                         **cluster_kwargs
                     )
                 )
@@ -2343,7 +2462,7 @@ class Alluvial:
         flow_patches = []
         for out_flows in flows:
             for out_flow in out_flows:
-                flow_patches.append(out_flow.get_patch(**flow_kwargs))
+                flow_patches.append(out_flow.get_artist(**flow_kwargs))
         all_patches = []
         all_patches.extend(flow_patches)
         all_patches.extend(cluster_patches)

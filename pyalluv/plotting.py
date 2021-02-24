@@ -7,7 +7,6 @@ from matplotlib import cbook
 from matplotlib.artist import Artist
 # from matplotlib import transforms
 # from matplotlib import _api
-import matplotlib.pyplot as plt
 # import matplotlib.dates as mdates
 from matplotlib.path import Path
 from matplotlib.patches import Rectangle
@@ -22,6 +21,7 @@ _log = logging.getLogger(__name__)
 __author__ = 'Jonas I. Liechti'
 
 
+# TODO: check if cbook has something for this
 def _to_valid_sequence(data, attribute):
     if data is None:
         return None
@@ -50,13 +50,12 @@ def _to_valid_sequence(data, attribute):
         return data
 
 
-# Note: could also be AlluvialArtistProxy
 class _ArtistProxy:
     """
     Proxy class for `Artist` subclasses used to draw the various element in an
     alluvial diagram.
 
-    This class assembles the common properties and relation to :class:`Patch`
+    This class assembles common properties and relations to :class:`Patch`
     of the elements present in an Alluvial diagram.
     """
     _artistcls = Artist  # derived must overwrite
@@ -67,22 +66,23 @@ class _ArtistProxy:
         self.stale = True
         self._tags = []
         self._artist = None
-        # keep artist specific kwargs in canonical form only
-        self._original_kwargs = dict(kwargs)
-        self._kwargs = cbook.normalize_kwargs(kwargs, self._artistcls)
+        self.set_styling(kwargs)
 
     def set_tags(self, tags: list):
         """Set a tag for the block."""
         self._tags = tags
 
     def get_tags(self):
+        """Return the list of tags."""
         return self._tags
 
     def add_tag(self, tag):
+        """Adding a new tag to the proxy."""
         if tag not in self._tags:
             self._tags.append(tag)
 
     def remove_tag(self, tag):
+        """Removing a tag."""
         if tag in self._tags:
             self._tags.remove(tag)
 
@@ -96,7 +96,6 @@ class _ArtistProxy:
 
     def set_styling(self, props):
         """Set the styling of the element."""
-
         self._original_kwargs = dict(props)
         self._kwargs = cbook.normalize_kwargs(props, self._artistcls)
 
@@ -110,7 +109,6 @@ class _ArtistProxy:
     def get_styling_prop(self, prop: str, altval=None):
         """
         Return the value of a specific styling property.
-
         If the property is not set *altval* is returned instead.
 
         Parameters
@@ -118,18 +116,8 @@ class _ArtistProxy:
         prop : str
             The name of the property to fetch.
         altval : Any (default: None)
-            The value to return in case the element has no styling property
-            with the name provided in *prop*.
-
+            The value to return in case *prop* is not set.
         """
-        # # OLD:
-        # _prop = self._sty_reduce_alias.get(prop, prop)
-        # if _prop in self._kwargs:
-        #     return self._kwarg[_prop]
-        # # if not but there are tags, get it from the tags
-        # # TODO: check if the prop is present in any of self._tags
-        # # if not in tags or no tags return altval
-        # return altval
         return self._kwargs.get(prop, self._original_kwargs.get(prop, altval))
 
     @property
@@ -154,24 +142,14 @@ class _ArtistProxy:
         return applicable
 
     def create_artist(self, ax, **kwargs):
-        """
-        Create the patch (or collection) for this element and return whether
-        the element has individual styling or not.
-        """
+        """Create the artist of this proxy."""
         _kwargs = cbook.normalize_kwargs(kwargs, self._artistcls)
         _kwargs.update(self._kwargs)
         _kwargs = self._applicable_properties(_kwargs)
         self._create_artist(ax, **_kwargs)
-        self.stale = False
 
     def get_artist(self,):
-        # self.set_path(self.create_path())
-        # return patches.PathPatch(
-        #     self.get_path(),
-        #     **_kwargs
-        # )
-        # TODO: set stale=True in setter fcts
-        if self.stale:
+        if self._artist is None:
             raise ValueError("The artist has not been created.")
         return self._artist
 
@@ -190,9 +168,7 @@ class _Block(_ArtistProxy):
     layout algorithm and thus after creation. This is the rational to why
     *_Block* inherits directly from `matplotlib.patches.Patch`, rather than
     `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
-
     """
-    # set the artist subclass to use
     _artistcls = Rectangle
 
     # TODO uncomment once in mpl
@@ -200,7 +176,7 @@ class _Block(_ArtistProxy):
     def __init__(self, height, xa=None, ya=None, label=None,
                  tag=None, horizontalalignment='left',
                  verticalalignment='bottom', label_margin=(0, 0),
-                 pathprops=None, **kwargs):
+                 **kwargs):
         """
         Parameters
         -----------
@@ -221,24 +197,18 @@ class _Block(_ArtistProxy):
         label_margin: (float, float), default: (0., 0.)
             x and y margin in target coordinates of ``self.get_transform()``
             and added to the *anchor* point to set the point to draw the label.
-        pathprops : None
-          TODO: This might be not needed, it's rather unlikely to be used.
-          Keyword arguments that are passed to `matplotlib.path.Path`.
 
         Other Parameters
         ----------------
         **kwargs : Allowed are all `.Rectangle` properties:
 
+          TODO: set to Rectangle (if it is registered)
           %(Patch_kwdoc)s
 
         """
         super().__init__(label=label, **kwargs)
 
-        # TODO: only keep what's in else:
-        if isinstance(height, (list, tuple)):
-            self._height = len(height)
-        else:
-            self._height = height
+        self._height = height
         self._xa = xa
         self._ya = ya
         self._set_horizontalalignment(horizontalalignment)
@@ -246,11 +216,9 @@ class _Block(_ArtistProxy):
         # init the in and out flows:
         self._outflows = []
         self._inflows = []
-        # self.label = label or ''
         self._label = label
-
         self.label_margin = label_margin
-        self.pathprops = pathprops or dict()
+        # TODO: replace dict with list
         self.in_margin = {'bottom': 0, 'top': 0}
         self.out_margin = {'bottom': 0, 'top': 0}
 
@@ -262,17 +230,21 @@ class _Block(_ArtistProxy):
         """Return the y coordinate of the anchor point."""
         return self._ya
 
+    def get_bounds(self,):
+        """Return the bounds (x0, y0, x1, y1) of `.Bbox`."""
+        return self._artist.get_bbox().bounds
+
     def get_height(self, converted=False):
         """Return the height of the block."""
         if converted:
-            x0, y0, x1, y1 = self.get_limits()
+            x0, y0, x1, y1 = self.get_bounds()
             return y1 - y0
         return self._height
 
     def get_width(self, converted=False):
         """Return the width of the block."""
         if converted:
-            x0, y0, x1, y1 = self.get_limits()
+            x0, y0, x1, y1 = self.get_bounds()
             return x1 - x0
         else:
             return self._artist.get_width()
@@ -367,17 +339,6 @@ class _Block(_ArtistProxy):
         self._height = height
         self.stale = True
 
-    # TODO: inloc and outloc should be set.
-    # def set_y(self, y):
-    #     self._y0 = y
-    #     if self._y0 is not None:
-    #         self._mid_height = self._y0 + 0.5 * self._height
-    #         self._set_inloc()
-    #         self._set_outloc()
-    #     else:
-    #         self._mid_height = None
-    #     self.stale = True
-
     def _set_horizontalalignment(self, align):
         # TODO: uncomment once in mpl
         # _api.check_in_list(['center', 'left', 'right'], align=align)
@@ -404,12 +365,6 @@ class _Block(_ArtistProxy):
     def set_inflows(self, inflows):
         self._inflows = inflows
 
-    # when it was a Patch
-    # def get_bbox(self):
-    #     """Return the `.Bbox`."""
-    #     x0, y0, x1, y1 = self._convert_units()
-    #     return transforms.Bbox.from_extents(x0, y0, x1, y1)
-
     xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
     ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
     y = property(get_y, set_y, doc="The y coordinate of the block bottom")
@@ -425,83 +380,6 @@ class _Block(_ArtistProxy):
 
     def add_inflow(self, inflow):
         self._inflows.append(inflow)
-
-    # when it was a Patch
-    # def get_path(self):
-    #     """Return the vertices of the block."""
-    #     # vertices = [
-    #     #     (self._x0, self._y0),
-    #     #     (self._x0, self._y0 + self._height),
-    #     #     (self._x0 + self._width, self._y0 + self._height),
-    #     #     (self._x0 + self._width, self._y0),
-    #     #     (self._x0, self._y0)  # ignored as codes[-1] is CLOSEPOLY
-    #     # ]
-    #     # codes = [
-    #     #     Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO, Path.CLOSEPOLY
-    #     # ]
-    #     # return Path(
-    #     #     vertices,
-    #     #     codes,
-    #     #     **self.pathprops
-    #     # )
-    #     return Path.unit_rectangle()
-
-    # when it was a Patch
-    # def _convert_units(self):
-    #     """Convert bounds of the rectangle."""
-    #     x0, y0 = self.get_xy()
-    #     x0 = self.convert_xunits(x0)
-    #     y0 = self.convert_yunits(y0)
-    #     x1 = self.convert_xunits(x0 + self._width)
-    #     y1 = self.convert_yunits(y0 + self._height)
-    #     return x0, y0, x1, y1
-
-    # when it was a Patch
-    # def get_patch_transform(self):
-    #     # Note: This cannot be called until after this has been added to
-    #     # an Axes, otherwise unit conversion will fail. This makes it very
-    #     # important to call the accessor method and not directly access the
-    #     # transformation member variable.
-    #     bbox = self.get_bbox()
-    #     # return (transforms.BboxTransformTo(bbox)
-    #     #         + transforms.Affine2D().rotate_deg_around(
-    #     #             bbox.x0, bbox.y0, self.angle))
-    #     return transforms.BboxTransformTo(bbox)
-    # def set_mid_height(self, mid_height):
-    #     self._mid_height = mid_height
-    #     if self._mid_height is not None:
-    #         self._y0 = self._mid_height - 0.5 * self._height
-    #         self._set_inloc()
-    #         self._set_outloc()
-    #     else:
-    #         self._y0 = None
-    #     self.stale = True
-
-    # old
-    # def get_mid_height(self):
-    #     if self._mid_height is None:
-    #         _log.warning(
-    #             "Before accessing vertical coordinates of a block (i.e. *y* or"
-    #             " *mid_heigth*) the block need to be distributed vertically."
-    #         )
-    #     return self._mid_height
-    # def _get_xy_from_anchor(self, anchor):
-    #     # set x and y (if possible)
-    #     if isinstance(anchor, (list, tuple)):
-    #         xa, ya = anchor
-    #     else:
-    #         xa, ya = anchor, None
-    #     if xa is not None:
-    #         xa -= 0.5 * self._width
-    #         if self._horizontalalignment == 'left':
-    #             xa += 0.5 * self._width
-    #         elif self._horizontalalignment == 'right':
-    #             xa -= 0.5 * self._width
-    #     return xa, ya
-    # mid_height = property(
-    #     get_mid_height, set_mid_height,
-    #     doc="y coordinate of the block's center."
-    # )
 
     def _create_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
@@ -659,12 +537,9 @@ class _Block(_ArtistProxy):
         self.in_margin[in_loc] += flow_width
         return anchor_in, top_in
 
-    def get_limits(self,):
-        return self._artist._convert_units()
-
     def get_inloc(self,):
         if self._artist is not None:
-            x0, y0, x1, y1 = self.get_limits()
+            x0, y0, x1, y1 = self.get_bounds()
         else:
             x0, y0 = self.get_xy()
             y1 = y0 + self.get_height()
@@ -674,7 +549,7 @@ class _Block(_ArtistProxy):
     def get_outloc(self,):
         # _width = self.get_width()
         if self._artist is not None:
-            x0, y0, x1, y1 = self.get_limits()
+            x0, y0, x1, y1 = self.get_bounds()
         else:
             x0, y0 = self.get_xy()
             x1 = x0 + self.get_width()
@@ -812,6 +687,16 @@ class _Flow(_ArtistProxy):
         # be the case for this artist too.
         self._artist._transformSet = other.is_transform_set()
 
+    def _get_dimensions(self,):
+        """Return the dimensions (widht and height) of the linked Proxies."""
+        sbounds = self.source.get_bounds()
+        swidth = sbounds[2] - sbounds[0]
+        sheight = sbounds[3] - sbounds[1]
+        tbounds = self.target.get_bounds()
+        twidth = tbounds[2] - tbounds[0]
+        theight = tbounds[3] - tbounds[1]
+        return (swidth, sheight), (twidth, theight)
+
     # TODO: needs updating (no modifications of kwargs)
     def _create_artist(self, ax, **kwargs):
         _ref_properties = {}
@@ -825,78 +710,7 @@ class _Flow(_ArtistProxy):
                 # TODO
                 _ref_properties[coloring] = None
 
-        # _to_in_kwargs = {}
-        # _to_out_kwargs = {}
-        # for kw in kwargs:
-        #     if kw.startswith('in_'):
-        #         _to_in_kwargs[kw[3:]] = kwargs.pop(kw)
-        #     elif kw.startswith('out_'):
-        #         _to_out_kwargs[kw[4:]] = kwargs.pop(kw)
-        # # update with flow specific styling
-        # kwargs.update(self._kwargs)
-        # for _color in ['facecolor', 'edgecolor']:
-        #     _set_color = kwargs.pop(_color, None)
-        #     _set_alpha = kwargs.pop('alpha', None)
-        #     if isinstance(_set_alpha, (int, float)):
-        #         kwargs['alpha'] = _set_alpha
-        #         _set_alpha = None
-        #     color_is_set = False
-        #     if _set_color == 'source' or _set_color == 'cluster':
-        #         from_cluster = self.source
-        #         color_is_set = True
-        #     elif _set_color == 'target':
-        #         from_cluster = self.target
-        #         color_is_set = True
-        #     elif isinstance(_set_color, str) and '__' in _set_color:
-        #         which_cluster, flow_type = _set_color.split('__')
-        #         if which_cluster == 'target':
-        #             from_cluster = self.target
-        #         else:
-        #             from_cluster = self.source
-        #         if flow_type == 'migration' \
-        #                 and self.source._kwargs.get(_color) \
-        #                 != self.target._kwargs.get(_color):
-        #             color_is_set = True
-        #             if _set_alpha:
-        #                 kwargs['alpha'] = _set_alpha.get(
-        #                     'migration',
-        #                     _set_alpha.get('default', self.default_alpha)
-        #                 )
-        #         elif flow_type == 'reside'  \
-        #                 and self.source._kwargs.get(_color) \
-        #                 == self.target._kwargs.get(_color):
-        #             color_is_set = True
-        #             if _set_alpha:
-        #                 kwargs['alpha'] = _set_alpha.get(
-        #                     'reside',
-        #                     _set_alpha.get('default', self.default_alpha)
-        #                 )
-        #         else:
-        #             _set_color = None
-        #     if color_is_set:
-        #         kwargs[_color] = from_cluster._kwargs.get(
-        #             _color, None
-        #         )
-
-        #     # set it back
-        #     else:
-        #         kwargs[_color] = _set_color
-        #         if _set_color is None:
-        #             if _color == 'facecolor':
-        #                 kwargs[_color] = self.default_fc
-        #             elif _color == 'edgecolor':
-        #                 kwargs[_color] = self.default_ec
-        #         if _set_alpha:
-        #             kwargs['alpha'] = _set_alpha.get('default',
-        #                                              self.default_alpha)
-        # # line below is probably not needed as alpha is set with the color
-        # kwargs['alpha'] = kwargs.get('alpha', self.default_alpha)
-        # # set in/out only flow styling
-        # _in_kwargs = dict(kwargs)
-        # _in_kwargs.update(_to_in_kwargs)
-        # _out_kwargs = dict(kwargs)
-        # _out_kwargs.update(_to_out_kwargs)
-
+        (_sw, _sh), (_tw, _th) = self._get_dimensions()
         _dist = None
         if self.out_loc is not None:
             if self.in_loc is not None:
@@ -904,7 +718,7 @@ class _Flow(_ArtistProxy):
                     self.target.get_inloc()['bottom'][0] - self.source.get_outloc()['bottom'][0]
                 )
             else:
-                _dist = 2 * self.source.get_width(converted=True)
+                _dist = 2 * _sw
                 # kwargs = _out_kwargs
         else:
             if self.in_loc is not None:
@@ -915,10 +729,8 @@ class _Flow(_ArtistProxy):
 
         # now complete the path points
         if self.anchor_out is not None:
-            anchor_out_inner = (
-                self.anchor_out[0] - 0.5 * self.source.get_width(converted=True),
-                self.anchor_out[1]
-            )
+            anchor_out_inner = (self.anchor_out[0] - 0.5 * _sw,
+                                self.anchor_out[1])
             dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
         else:
             # TODO set to form vanishing flow
@@ -926,10 +738,7 @@ class _Flow(_ArtistProxy):
             # dir_out_anchor =
             pass
         if self.top_out is not None:
-            top_out_inner = (
-                self.top_out[0] - 0.5 * self.source.get_width(converted=True),
-                self.top_out[1]
-            )
+            top_out_inner = (self.top_out[0] - 0.5 * _sw, self.top_out[1])
             # 2nd point 2/3 of distance between clusters
             dir_out_top = (self.top_out[0] + _dist, self.top_out[1])
         else:
@@ -938,10 +747,8 @@ class _Flow(_ArtistProxy):
             # dir_out_top =
             pass
         if self.anchor_in is not None:
-            anchor_in_inner = (
-                self.anchor_in[0] + 0.5 * self.target.get_width(converted=True),
-                self.anchor_in[1]
-            )
+            anchor_in_inner = (self.anchor_in[0] + 0.5 * _tw,
+                               self.anchor_in[1])
             dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
         else:
             # TODO set to form new in flow
@@ -949,10 +756,7 @@ class _Flow(_ArtistProxy):
             # dir_in_anchor =
             pass
         if self.top_in is not None:
-            top_in_inner = (
-                self.top_in[0] + 0.5 * self.target.get_width(converted=True),
-                self.top_in[1]
-            )
+            top_in_inner = (self.top_in[0] + 0.5 * _tw, self.top_in[1])
             dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
         else:
             # TODO set to form new in flow
@@ -960,53 +764,22 @@ class _Flow(_ArtistProxy):
             # dir_in_top =
             pass
 
-        vertices = [
-            self.anchor_out,
-            dir_out_anchor, dir_in_anchor, self.anchor_in,
-            anchor_in_inner, top_in_inner, self.top_in,
-            dir_in_top, dir_out_top, self.top_out,
-            top_out_inner, anchor_out_inner,
-            self.anchor_out
-        ]
-        codes = [
-            Path.MOVETO,
-            Path.CURVE4, Path.CURVE4, Path.CURVE4,
-            Path.LINETO, Path.LINETO, Path.LINETO,
-            Path.CURVE4, Path.CURVE4, Path.CURVE4,
-            Path.LINETO, Path.LINETO,
-            Path.CLOSEPOLY
-        ]
+        vertices = [self.anchor_out, dir_out_anchor, dir_in_anchor,
+                    self.anchor_in, anchor_in_inner, top_in_inner, self.top_in,
+                    dir_in_top, dir_out_top, self.top_out, top_out_inner,
+                    anchor_out_inner, self.anchor_out]
+        codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4,
+                 Path.LINETO, Path.LINETO, Path.LINETO, Path.CURVE4,
+                 Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO,
+                 Path.CLOSEPOLY]
         # TODO: not sure about these values
         closed = True
         readonly = True
         interp_steps = 1
         _path = Path(vertices, codes, interp_steps, closed, readonly)
-
-        # flow_patch = patches.PathPatch(_path, **_kwargs)
-
-        # # return flow_patch
-        # self._artist = patches.PathPatch(_path, **kwargs)
-        # # finally attach the artist
-        # ax.add_patch(self._artist)
-
         self._artist = ax.add_patch(self._artistcls(_path, **kwargs))
         for prop, ref_artist in _ref_properties.items():
             self._set_from_artist(prop, ref_artist)
-
-    # # TODO: ideally setting ec and fc should not happen in this class, only
-    # # special colors should be converted
-    # def set_edgecolor(self, color):
-    #     if color in ['source', 'target', 's', 't', 'interpolate']:
-    #         # get the color form source or target
-    #         # or
-    #         # make this flux use a patchcollection with a linearsegment cmap
-    #         pass
-    #     # TODO: replace the same keyword in self._kwargs with an actual color
-    #     # that can be passed to PathPatch
-    #     pass
-
-    # def set_facecolor(self, color):
-    #     pass
 
 
 class ProxyCollection(_ArtistProxy):
@@ -1038,23 +811,6 @@ class ProxyCollection(_ArtistProxy):
         # TODO: this can be more generally just a ArtistProxy
         self._proxies = proxies
 
-        # ###
-        # Below is from SubDiagram.__init__
-
-        # # TODO: This is back from when it was a subclass of collection > used??
-        # if match_original:
-        #     def determine_facecolor(block):
-        #         # TODO: Block does not have a get_fill, right?
-        #         if block.get_fill():
-        #             return block.get_facecolor()
-        #         return [0, 0, 0, 0]
-        #     kwargs['facecolors'] = [determine_facecolor(b) for b in self._blocks]
-        #     kwargs['edgecolors'] = [b.get_edgecolor() for b in self._blocks]
-        #     kwargs['linewidths'] = [b.get_linewidth() for b in self._blocks]
-        #     kwargs['linestyles'] = [b.get_linestyle() for b in self._blocks]
-        #     kwargs['antialiaseds'] = [b.get_antialiased() for b in self._blocks]
-
-        # ###
     def __iter__(self):
         return iter(self._proxies)
 
@@ -1106,31 +862,13 @@ class ProxyCollection(_ArtistProxy):
             self._artist.set_array(
                 np.asarray([getattr(proxy, self._cmap_data)
                             for proxy in self._proxies]))
-            # np.asarray([getattr(block, self._cmap_data)
-            #             for column in self._columns
-            #             for block in column]))
-
-        # ###
-        # TODO: Draw the flows
-        # ###
-        # now the flows
-        # self._flow_collection = PatchCollection([flow.get_artist()
-        #                                          for flow in self._flows])
-
-    # NOTE: this is in _AlluvialElement
-    # def create_patch(self, match_original=False, **kwargs):
-    #     _kwargs = dict(kwargs)
-    #     _kwargs.update(self._kwargs)
-    #     # for col_id in range(self._nbr_columns):
-    #     #     for block in self._columns[col_id]:
 
     def add_proxy(self, proxy):
-        """Add a Block."""
+        """Add a Proxy."""
         self._proxies.append(proxy)
 
 
-# TODO: maybe Tag is not even needed, but can just be ProxyCollection
-class Tag(ProxyCollection):
+class Tag:
     """
     A collection of `Blocks`
     """
@@ -1141,24 +879,7 @@ class Tag(ProxyCollection):
         label : str, optional
             The label of this collection.
         """
-        super().__init__(label=label, **kwargs)
-
-    # def set_paths(self, blocks):
-    #     """Set the paths for all blocks in this collection."""
-    #     self._paths = []
-    #     for col in blocks:
-    #         self._paths.extend(
-    #             [p.get_transform().transform_path(p.get_path())
-    #              for p in col
-    #              if not p.is_tagged])
-
-    def get_paths(self,):
-        return [b.get_transform().transform_path(b.get_path())
-                for b in self._proxies]
-
-    def add_block(self, block):
-        self._proxies.append(block)
-        # update the styling
+        pass
 
 
 class SubDiagram:
@@ -1166,7 +887,6 @@ class SubDiagram:
     A collection of Blocks and Flows belonging to a diagram.
 
     """
-    # def __init__(self, patches, match_original=False, **kwargs):
     def __init__(self, x, columns, flows, fractionflow,
                  label=None, yoff=0, hspace=1, hspace_combine='add',
                  label_margin=(0, 0), layout='centered', blockprops=None,
@@ -1247,23 +967,15 @@ class SubDiagram:
         self._columns = []
         if _provided_blocks:
             for col in columns:
-                # self._columns.append([])
-                # self._columns.extend([i for i in
-                #                       range(b_id, newb_id)])
                 column = list(col)
                 _blocks.extend(column)
                 self._columns.append(column)
-            # self._columns = [list(col) for col in columns]
         else:
             for xi, col in zip(x, columns):
                 column = [_Block(size, xa=xi, **self._blockprops)
                           for size in col]
                 self._columns.append(column)
                 _blocks.extend(column)
-                # self._columns.append([_Block(size, xa=xi, **self._blockprops)
-                #                       for size in column])
-                # self._columns.append([_Block(size, xa=xi,
-                #                      **kwargs) for size in column])
         self._nbr_columns = len(self._columns)
 
         # TODO: below attributes need to be handled
@@ -1290,17 +1002,12 @@ class SubDiagram:
                                         target=t_col[i],
                                         relative_flow=fractionflow))
         # TODO: update flowprops with kwargs and label
-        self._flows = ProxyCollection(_flows, label=label,
-                                      **self._flowprops)
-
+        self._flows = ProxyCollection(_flows, label=label, **self._flowprops)
         self._hspace = hspace
-
         # TODO: create set_... and process like set_hspace
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
-
         self._label_margin = label_margin
-
         self._kwargs = kwargs
 
     def get_layout(self):
@@ -1352,9 +1059,7 @@ class SubDiagram:
 
     def add_block(self, column: int, block):
         """Add a Block to a column."""
-        # add the block to the blocks
-        super().add_block(block)
-        # add the block to _columns
+        super().add_proxy(block)
         self._columns[column].append(block)
 
     def add_flow(self, column, flow):
@@ -1405,13 +1110,10 @@ class SubDiagram:
             # in both cases no further sorting is needed
             if layout == 'centered':
                 # sort so to put biggest height in the middle
-                # self._columns[col_id] = _column[::-2][::-1] + \
-                #     _column[nbr_blocks % 2::2][::-1]
                 ordering = ordering[::-2][::-1] + \
                     ordering[nbr_blocks % 2::2][::-1]
-                # update the ordering
+                # update the ordering the update the y coords
                 self._reorder_column(col_id, ordering)
-                # set positioning
                 self._update_ycoords(col_id, col_hspace, layout)
                 # ###
                 # TODO: both methods below need to be checked
@@ -1421,16 +1123,13 @@ class SubDiagram:
                 # self._pairwise_swapping(col_id)
 
                 # TODO: bad implementation, avoid duplicated get_y call
-                _min_y = min(
-                    self._columns[col_id],
-                    key=lambda x: x.get_y()
-                ).get_y() - 2 * col_hspace
-                _max_y_cluster = max(
-                    self._columns[col_id],
-                    key=lambda x: x.get_y() + x.get_height()
-                )
+                _min_y = min(self._columns[col_id],
+                             key=lambda x: x.get_y()).get_y() - 2 * col_hspace
+                _max_y_cluster = max(self._columns[col_id],
+                                     key=lambda x: x.get_y() + x.get_height())
                 _max_y = _max_y_cluster.get_y() + \
                     _max_y_cluster.get_height() + 2 * col_hspace
+                # TODO: not doing anything with this so far...
                 self.y_min = min(
                     self.y_min,
                     _min_y
@@ -1468,19 +1167,10 @@ class SubDiagram:
                 sort_key = [bisect_left(old_mid_heights, col.get_yc())
                             for col in _column]
                 cs, _sort_key = zip(
-                    *sorted(
-                        zip(
-                            list(range(nbr_blocks)),
-                            sort_key,
-                        ),
-                        key=lambda x: x[1]
-                    )
+                    *sorted(zip(list(range(nbr_blocks)), sort_key,),
+                            key=lambda x: x[1])
                 )
                 self._reorder_column(col_id, ordering=cs)
-                # self._columns[col_id] = [
-                #     _column[_k] for _k in cs
-                # ]
-
                 # redistribute them
                 self._update_ycoords(col_id, col_hspace, layout)
                 old_mid_heights = [block.get_yc()
@@ -1489,41 +1179,32 @@ class SubDiagram:
                 break
 
     def _pairwise_swapping(self, col_id):
+        # TODO: this is broken: update the ordering then call _reorder_column
         _column = self._columns[col_id]
-        # TODO: does not really make sense to recompute them here
         nbr_blocks = len(_column)
         col_hspace = self.get_column_hspace(col_id)
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
-                b1 = _column[i - 1]
-                b2 = _column[i]
-                if self._swap_clusters((b1, b2), col_hspace,
-                                       'backwards'):
+                b1, b2 = _column[i - 1], _column[i]
+                if self._swap_clusters((b1, b2), col_hspace, 'backwards'):
                     b2.set_y(b1.get_y())
-                    b1.set_y(
-                        b2.get_y() + b2.get_height() + col_hspace
-                    )
-                    _column[i - 1] = b2
-                    _column[i] = b1
+                    b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
+                    _column[i - 1], _column[i] = b2, b1
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
                 b1 = _column[nbr_blocks - i - 1]
                 b2 = _column[nbr_blocks - i]
-                if self._swap_clusters((b1, b2), col_hspace,
-                                       'backwards'):
+                if self._swap_clusters((b1, b2), col_hspace, 'backwards'):
                     b2.set_y(b1.get_y())
-                    b1.set_y(
-                        b2.get_y() + b2.get_height() + col_hspace
-                    )
-                    self._columns[col_id][nbr_blocks - i - 1] = b2
-                    self._columns[col_id][nbr_blocks - i] = b1
+                    b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
+                    _column[nbr_blocks - i - 1] = b2
+                    _column[nbr_blocks - i] = b1
 
     def _reorder_column(self, col_id, ordering):
         """Update the ordering of blocks in a column"""
         _column = self._columns[col_id]
         self._columns[col_id] = [_column[newid] for newid in ordering]
 
-    # NOTE: almost indep on self
     def _update_ycoords(self, column: int, hspace, layout):
         """
         Update the y coordinate of the blocks in a column based on the
@@ -1546,11 +1227,6 @@ class SubDiagram:
         high = _column[-1].get_y() + _column[-1].get_height()
         if layout == 'centered':
             cent_offset = low + 0.5 * (high - low)
-            # _h_clusters = 0.5 * len(clusters)
-            # cent_idx = int(_h_clusters) - 1 \
-            #     if _h_clusters.is_integer() \
-            #     else int(_h_clusters)
-            # cent_offest = clusters[cent_idx].mid_height
             for block in _column:
                 block.set_y(block.get_y() - cent_offset)
         elif layout == 'top':
@@ -1561,44 +1237,29 @@ class SubDiagram:
         """
         Check if swapping to blocks leads to shorter vertical flow distances.
         """
-        # _blocks = [self._blocks[bid] for bid in (bid1, bid2)]
         squared_diff = {}
-
         for block in blocks:
-            weights = []
-            sqdiff = []
+            weights, sqdiff = [], []
             if direction in ['both', 'backwards']:
                 for flow in block.inflows:
                     if flow.source is not None:
                         weights.append(flow.flow)
-                        sqdiff.append(abs(
-                            block.get_yc() - flow.source.get_yc()
-                        ))
+                        sqdiff.append(abs(block.get_yc() - flow.source.get_yc()))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
                     if flow.target is not None:
                         weights.append(flow.flow)
-                        sqdiff.append(abs(
-                            block.get_yc() - flow.target.get_yc()
-                        ))
+                        sqdiff.append(abs(block.get_yc() - flow.target.get_yc()))
             if sum(weights) > 0.0:
                 squared_diff[block] = sum(
-                    [weights[i] * sqdiff[i]
-                        for i in range(len(weights))]
+                    [weights[i] * sqdiff[i] for i in range(len(weights))]
                 ) / sum(weights)
-        # inverse order and check again
-        # TODO: check why this assert statement fails
-        # print(n1.get_y(), n2.get_y())
         # assert n1.get_y() < n2.get_y()
         # TODO: Cannot recreate the thought process behind this...
         inv_mid_height = [
             blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
             blocks[0].get_y() + 0.5 * blocks[1].get_height()
         ]
-        # inv_mid_height = {
-        #     bid1: blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
-        #     bid2: blocks[0].get_y() + 0.5 * blocks[1].get_height()
-        # }
         squared_diff_inf = {}
         for i, block in enumerate(blocks):
             weights = []
@@ -1618,17 +1279,15 @@ class SubDiagram:
                             abs(inv_mid_height[i] - flow.target.get_yc())
                         )
             if sum(weights) > 0.0:
-                squared_diff_inf[block] = sum([
-                    weights[i] * sqdiff[i]
-                    for i in range(len(weights))
-                ]) / sum(weights)
+                squared_diff_inf[block] = sum(
+                    [weights[i] * sqdiff[i] for i in range(len(weights))]
+                ) / sum(weights)
         if sum(squared_diff.values()) > sum(squared_diff_inf.values()):
             return True
         else:
             return False
 
-    # TODO: automate the attribute separation or separate by construction
-    # this should go away
+    # TODO: is this still needed? if yes, automate or use _singular_props
     @classmethod
     def separate_kwargs(cls, kwargs):
         """Separate all relevant kwargs for the init if a SubDiagram."""
@@ -1664,44 +1323,14 @@ class Alluvial:
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
     # @docstring.dedent_interpd
-    def __init__(self, x=None, ax=None, y_pos='overwrite', tags=None,
-                 cluster_w_spacing=1, blockprops=None, flowprops=None,
-                 # flow_kwargs={},
-                 label_kwargs={}, **kwargs):
+    def __init__(self, x=None, ax=None, tags=None, blockprops=None,
+                 flowprops=None, label_kwargs={}, **kwargs):
         """
         Create a new Alluvial instance.
 
 
         Parameters
         ===========
-
-        clusters: dict[str, dict], dict[float, list] or list[list]
-          .. warning::
-            to remove
-          You have 2 options to create an Alluvial diagram::
-
-          raw data: dict[str, dict]
-            *NOT IMPLEMENTED YET*
-
-            Provide for each cluster (`key`) a dictionary specifying the
-            out-flows in the form of a dictionary (`key`: cluster, `value`: flow).
-
-            .. note::
-
-              The `key` ``None`` can hold a dictionary specifying flows from/to
-              outside the system. If is present in the provided dictionary it
-              allows to specify in-flows, i.e. data source that were not present
-              at the previous slice.
-
-              If it is present in the out-flows of a cluster, the specified amount
-              simply vanishes and will not lead to a flow.
-
-          collections of :obj:`.Cluster`: dict[float, list] and list[list]
-            If a `list` is provided each element must be a `list`
-            of :obj:`.Cluster` objects. A `dictionary` must provide a `list` of
-            :obj:`.Cluster` (*value*) for a horizontal position (*key*), e.g.
-            ``{1.0: [c11, c12, ...], 2.0: [c21, c22, ...], ...}``.
-
         x : array-like, optional
           The x coordinates for the columns in the Alluvial diagram.
 
@@ -1715,63 +1344,21 @@ class Alluvial:
         ax: `~.axes.Axes`
           Axes onto which the Alluvial diagram should be drawn.
           If *ax* is not provided a new Axes instance will be created.
-        y_pos: str
-          **options:** ``'overwrite'``, ``'keep'``, ``'complement'``, ``'sorted'``
-
-          'overwrite':
-             Ignore existing y coordinates for a block and set the vertical
-             position to minimize the vertical displacements of all flows.
-          'keep':
-            use the block's :meth:`_Block.get_y`. If a block has no y
-            coordinate set this raises an exception.
-          'complement':
-            use the block's :meth:`_Block.get_y` if
-            set. Blocks without y position are positioned relative to the other
-            blocks by minimizing the vertical displacements of all flows.
-          'sorted':
-            NOT IMPLEMENTED YET
         cluster_w_spacing: float, int (default=1)
           Vertical spacing between blocks.
         blockprops : dict, optional
-          The properties used to draw the blocks. *blockprops* accepts the
-          following specific keyword arguments:
+          The properties used to draw the blocks. *blockprops* accepts all
+          arguments for :class:`matplotlib.patches.Rectangle`:
+
+          %(Rectangle_kwdoc)s
+
         flowprops: dict, optional
-          The properties used to draw the flows. *flowprops* accepts the
-          following specific keyword arguments:
+          The properties used to draw the flows. *flowprops* accepts keyword
+          arguments for :class:`matplotlib.patches.PathPatch`:
 
-          - TODO
-
-          Any further arguments provided are passed to
-          `matplotlib.patches.PathPatch`.
-
-          Note that *blockprops* and *flowprops* set the properties of all
-          sub-diagrams, unless specific properties are provided when a
-          sub-diagram is added (see :meth:`add` for details), or
-          :meth:`set_blockprops` is called before adding further sub-diagrams.
-
-          TODO: specify particular blockprops kw's
-          `facecolor`, `edgecolor`, `alpha`, `linewidth`, ...
-          ==========   ======================================================
-          Key          Description
-          ==========   ======================================================
-          width        The width of the arrow in points
-          headwidth    The width of the base of the arrow head in points
-          headlength   The length of the arrow head in points
-          shrink       Fraction of total length to shrink from both ends
-          ?            Any key to :class:`matplotlib.patches.FancyArrowPatch`
-          ==========   ======================================================
-
-          For a list of available options see
-          :class:`matplotlib.patches.PathPatch`
-          TODO: or this:
           %(Patch_kwdoc)s
 
-        flow_kwargs: dict (default={})
-          dictionary styling the :obj:`~matplotlib.patches.PathPatch` of flows.
-
-          for a list of available options see
-          :class:`~matplotlib.patches.PathPatch`
-
+          TODO: this is old and needs to be redone:
           Note
           -----
 
@@ -1799,51 +1386,21 @@ class Alluvial:
                 set `edgecolor` to the color of the source block if source and
                 target block are of different colors.
 
-        **kwargs optional parameter:
-            x_lim: tuple
-              the horizontal limit values for the :class:`~matplotlib.axes.Axes`.
-            y_lim: tuple
-              the vertical limit values for the :class:`~matplotlib.axes.Axes`.
-            set_x_pos: bool
-              if `clusters` is a dict then the key is set for all blocks
-            cluster_width: float
-              (NOT IMPLEMENTED) overwrites width of all blocks
-            format_xaxis: bool (default=True)
-              If set to `True` the axes is formatted according to the data
-              provided. For now, this is only relevant if the horizontal positions
-              are :class:`~datetime.datetime` objects.
-              See :meth:`~.Alluvial.set_dates_xaxis` for further informations.
-            x_axis_offset: float
-              how much space (relative to total height)
-              should be reserved for the x_axis. If set to 0.0, then
-              the x labels will not be visible.
+            TODO: check the args below, remove or add to init
             fill_figure: bool
               indicating whether or not set the
               axis dimension to fill up the entire figure
             invisible_x/invisible_y: bool
               whether or not to draw these axis.
-            y_fix: dict
-              with x_pos as keys and a list of tuples
-              (block labels) as values. The position of blocks (tuples)
-              are swapped.
             redistribute_vertically: int (default=4)
-              how often the vertical pairwise swapping of blocks at a given time
-              point should be performed.
-            y_offset: float
-              offsets the vertical position of each block by this amount.
+              how often the vertical pairwise swapping of blocks at a given
+              time point should be performed.
 
-              .. note::
+          Note that *blockprops* and *flowprops* set the properties of all
+          sub-diagrams, unless specific properties are provided when a
+          sub-diagram is added (see :meth:`add` for details), or
+          :meth:`set_blockprops` is called before adding further sub-diagrams.
 
-                This ca be used to draw multiple alluvial diagrams on the same
-                :obj:`~matplotlib.axes.Axes` by simply calling
-                :class:`~.Alluvial` repeatedly with changing offset value, thus
-                stacking alluvial diagrams.
-
-        Attributes
-        ===========
-
-        clusters: dict
-          Holds for each vertical position a list of :obj:`._Block` objects.
         """
         if x is not None:
             self._x = _to_valid_sequence(x, 'x')
@@ -1856,35 +1413,22 @@ class Alluvial:
             # TODO: not sure if specifying the ticks is necessary
             ax = fig.add_subplot(1, 1, 1, xticks=[], yticks=[])
         self.ax = ax
-
         # store the inputs
-        self.y_pos = y_pos
-        self.cluster_w_spacing = cluster_w_spacing
         self._blockprops = blockprops
         self._flowprops = flowprops
-        # self._flow_kwargs = flow_kwargs
-        self._label_kwargs = label_kwargs
-
         self._diagrams = []
         self._tags = []
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
-        self._kwargs = {}
-        # TODO: unused for now
-        self._dirty = False  # indicate if between diagram flows exist
-
+        self._kwargs = dict(kwargs)
         # TODO: if arguments for add are passed they cannot remain in kwargs
-        if kwargs:
-            _kwargs = kwargs.copy()
-            # strap arguments for an add call
-            flows = _kwargs.pop('flows', None)
-            ext = _kwargs.pop('ext', None)
-            label = _kwargs.pop('label', '')
-            fractionflow = _kwargs.pop('fractionflow', False)
-            tags = _kwargs.pop('tags', None)
-            # keep styling related kwargs
-            self._kwargs = _kwargs
+        if self._kwargs:
+            flows = self._kwargs.pop('flows', None)
+            ext = self._kwargs.pop('ext', None)
+            label = self._kwargs.pop('label', '')
+            fractionflow = self._kwargs.pop('fractionflow', False)
+            tags = self._kwargs.pop('tags', None)
             # draw a diagram if *flows* were provided
             if flows is not None or ext is not None:
                 sdkw, self._kwargs = SubDiagram.separate_kwargs(
@@ -1895,163 +1439,7 @@ class Alluvial:
                          **sdkw)
                 self.finish()
 
-        # # if blocks are given in a list of lists (each list is a x position)
-        # self._set_x_pos = kwargs.get('set_x_pos', True)
-        # self._redistribute_vertically = kwargs.get(
-        #     'redistribute_vertically',
-        #     4
-        # )
-        # self.with_cluster_labels = kwargs.get('with_cluster_labels', True)
-        # self.format_xaxis = kwargs.get('format_xaxis', True)
-        # self._x_axis_offset = kwargs.get('x_axis_offset', 0.0)
-        # self._fill_figure = kwargs.get('fill_figure', False)
-        # self._invisible_y = kwargs.get('invisible_y', True)
-        # self._invisible_x = kwargs.get('invisible_x', False)
-        # self.y_offset = kwargs.get('y_offset', 0)
-        # self.y_fix = kwargs.get('y_fix', None)
-
-        # # this goes to the add method anyways
-        # if isinstance(clusters, dict):
-        #     self.clusters = clusters
-        # else:
-        #     self.clusters = {}
-        #     for cluster in clusters:
-        #         try:
-        #             self.clusters[cluster.x].append(cluster)
-        #         except KeyError:
-        #             self.clusters[cluster.x] = [cluster]
-        # self.x_positions = sorted(self.clusters.keys())
-        # set the x positions correctly for the clusters
-        # if self._set_x_pos:
-        #     for x_pos in self.x_positions:
-        #         for cluster in self.clusters[x_pos]:
-        #             cluster = cluster.set_x_pos(x_pos)
-        # self._x_dates = False
-        # _minor_tick = 'months'
-        # cluster_widths = []
-        # if isinstance(self.x_positions[0], datetime):
-        #     # assign date locator/formatter to the x-axis to get proper labels
-        #     if self.format_xaxis:
-        #         locator = mdates.AutoDateLocator(minticks=3)
-        #         formatter = mdates.AutoDateFormatter(locator)
-        #         self.ax.xaxis.set_major_locator(locator)
-        #         self.ax.xaxis.set_major_formatter(formatter)
-        #     self._x_dates = True
-        #     if (self.x_positions[-1] - self.x_positions[0]).days < 2 * 30:
-        #         _minor_tick = 'weeks'
-        #     self.clusters = {
-        #         mdates.date2num(x_pos): self.clusters[x_pos]
-        #         for x_pos in self.x_positions
-        #     }
-        #     self.x_positions = sorted(self.clusters.keys())
-        #     for x_pos in self.x_positions:
-        #         for cluster in self.clusters[x_pos]:
-        #             # in days (same as mdates.date2num)
-        #             cluster.set_width(cluster.width.total_seconds() / 60 / 60 / 24)
-        #             cluster_widths.append(cluster.get_width())
-        #             if cluster.label_margin is not None:
-        #                 _h_margin = cluster.label_margin[0].total_seconds() / 60 / 60 / 24
-        #                 cluster.label_margin = (
-        #                     _h_margin, cluster.label_margin[1]
-        #                 )
-        #             cluster.set_x_pos(mdates.date2num(cluster.x))
-
-        # # TODO: set the cluster.set_width property
-        # else:
-        #     for x_pos in self.x_positions:
-        #         for cluster in self.clusters[x_pos]:
-        #             cluster_widths.append(cluster.get_width())
-        # self.cluster_width = kwargs.get('cluster_width', None)
-        # self.x_lim = kwargs.get(
-        #     'x_lim',
-        #     (
-        #         self.x_positions[0] - 2 * min(cluster_widths),
-        #         # - 2 * self.clusters[self.x_positions[0]][0].get_width(),
-        #         self.x_positions[-1] + 2 * min(cluster_widths),
-        #         # + 2 * self.clusters[self.x_positions[-1]][0].get_width(),
-        #     )
-        # )
-        # self.y_min, self.y_max = None, None
-        # if self.y_pos == 'overwrite':
-        #     # reset the vertical positions for each row
-        #     for x_pos in self.x_positions:
-        #         self.distribute_blocks(x_pos)
-        #     for x_pos in self.x_positions:
-        #         self._move_new_clusters(x_pos)
-        #     for x_pos in self.x_positions:
-        #         nbr_clusters = len(self.clusters[x_pos])
-        #         for _ in range(nbr_clusters):
-        #             for i in range(1, nbr_clusters):
-        #                 n1 = self.clusters[x_pos][nbr_clusters - i - 1]
-        #                 n2 = self.clusters[x_pos][nbr_clusters - i]
-        #                 if self._swap_clusters(n1, n2, 'forwards'):
-        #                     n2.set_y(n1.get_y())
-        #                     n1.set_y(
-        #                         n2.get_y() + n2.get_height() + self.cluster_w_spacing
-        #                     )
-        #                     self.clusters[x_pos][nbr_clusters - i] = n1
-        #                     self.clusters[x_pos][nbr_clusters - i - 1] = n2
-        # else:
-        #     # TODO: keep and complement
-        #     pass
-        # if isinstance(self.y_fix, dict):
-        #     # TODO: allow to directly get the index given the cluster label
-        #     for x_pos in self.y_fix:
-        #         for st in self.y_fix[x_pos]:
-        #             n1_idx, n2_idx = (
-        #                 i for i, l in enumerate(
-        #                     map(lambda x: x.label, self.clusters[x_pos])
-        #                 )
-        #                 if l in st
-        #             )
-        #             self.clusters[x_pos][n1_idx], self.clusters[x_pos][n2_idx] = self.clusters[
-        #                 x_pos
-        #             ][n2_idx], self.clusters[x_pos][n1_idx]
-        #             self._update_ycoords(x_pos, self.cluster_w_spacing)
-
-        # # positions are set
-        # self.y_lim = kwargs.get('y_lim', (self.y_min, self.y_max))
-        # # set the colors
-        # # TODO
-
-        # # now draw
-        # patch_collection = self.get_patchcollection(
-        #     cluster_kwargs=self._cluster_kwargs,
-        #     flow_kwargs=self._flow_kwargs
-        # )
-        # self.ax.add_collection(patch_collection)
-        # if self.with_cluster_labels:
-        #     label_collection = self.get_labelcollection(**self._label_kwargs)
-        #     if label_collection:
-        #         for label in label_collection:
-        #             self.ax.annotate(**label)
-        # self.ax.set_xlim(
-        #     *self.x_lim
-        # )
-        # self.ax.set_ylim(
-        #     *self.y_lim
-        # )
-        # if self._fill_figure:
-        #     self.ax.set_position(
-        #         [
-        #             0.0,
-        #             self._x_axis_offset,
-        #             0.99,
-        #             1.0 - self._x_axis_offset
-        #         ]
-        #     )
-        # if self._invisible_y:
-        #     self.ax.get_yaxis().set_visible(False)
-        # if self._invisible_x:
-        #     self.ax.get_xaxis().set_visible(False)
-        # self.ax.spines['right'].set_color('none')
-        # self.ax.spines['left'].set_color('none')
-        # self.ax.spines['top'].set_color('none')
-        # self.ax.spines['bottom'].set_color('none')
-        # if isinstance(self.x_positions[0], datetime) and self.format_xaxis:
-        #     self.set_dates_xaxis(_minor_tick)
-
-    def get_x(self, ):
+    def get_x(self):
         """Return the sequence of x coordinates of the Alluvial diagram"""
         return self._x
 
@@ -2095,10 +1483,8 @@ class Alluvial:
                         _flow = flow.sum(1)
                     _col = _flow + e
                 columns.append(_col)
-
         if extout is not None:
-            # TODO: check extout format
-            pass
+            pass  # TODO: check extout format
         return columns
 
     def add(self, flows, ext=None, extout=None, x=None, label=None, yoff=0,
@@ -2188,6 +1574,7 @@ class Alluvial:
         tagprops : dict, optional
             Provide for each tag a dictionary that specifies the styling of
             blocks with this tag. See :meth:`
+
         Other Parameters
         ----------------
         **kwargs : `.SubDiagram` properties
@@ -2228,7 +1615,6 @@ class Alluvial:
           shape (P) given by *e[i+1]*.
         """
         _kwargs = dict(kwargs)
-        # check the provided arguments
         # TODO: make sure empty flows are accepted
         flows = _to_valid_sequence(flows, 'flows')
         if flows is not None:
@@ -2248,15 +1634,13 @@ class Alluvial:
                                 " You need to provide either `flows` or `ext`"
                                 " to create an Alluvial diagram.")
             ext = np.zeros(nbr_cols)
-            # Note: extout from the first column are ignored in the
-            # construction of the first columns
+            # Note: extout from the first column are ignored
             cinit = flows[0].sum(0)
         else:
             ext = _to_valid_sequence(ext, 'ext')
             if isinstance(ext[0], np.ndarray):
                 cinit = ext[0]
-                # if no flows were provided
-                if nbr_cols is None:
+                if nbr_cols is None:  # if no flows were provided
                     nbr_cols = len(ext)
                     flows = [[] for _ in range(nbr_cols - 1)]
             else:
@@ -2264,73 +1648,23 @@ class Alluvial:
                 if nbr_cols is None:
                     nbr_cols = 1
                 ext = np.zeros(nbr_cols)  # Note: we overwrite ext in this case
-
-        columns = self._create_columns(cinit, flows, ext, extout,
-                                       fractionflow)
-        # here we can process flows further before passing it to SubDiagram
-        # # but there is nothing further to do, it seems...
+        columns = self._create_columns(cinit, flows, ext, extout, fractionflow)
 
         if x is not None:
             x = _to_valid_sequence(x, 'x')
         elif self._x is not None:
             x = self._x
         else:
-            # use default if not specified
-            # x = self._x or [i for i in range(len(columns))]
             x, columns = index_of(columns)
-
-        # NOTE: add should anyways only accept kws for subdiagram
-        # sdkw, otherkw = SubDiagram.separate_kwargs(_kwargs)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
-        diagram = SubDiagram(x=x, columns=columns, flows=flows,
-                             fractionflow=fractionflow, label=label,
-                             yoff=yoff, blockprops=_blockprops,
-                             flowprops=_flowprops, **_kwargs)
-        # add the new subdiagram
-        # get the x coordinates
-        # TODO: cannot pass columns here. columns are a list of list[float]
-        # and not list[dict] (as set for SubDiagram for now)
+        diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
+                             fractionflow=fractionflow, blockprops=_blockprops,
+                             flowprops=_flowprops, yoff=yoff, **_kwargs)
         self._add_diagram(diagram)
         self._dlabels.append(label or f'diagram-{self._diagc}')
         self._extouts.append(extout)
         self._diagc += 1
-
-        # # Create the sequence of clusterings
-        # time_points = [0, 4, 9, 14, 18.2]
-        # # Define the cluster sizes per snapshot
-        # # at each time point {cluster_id: cluster_size})
-        # cluster_sizes = [{0: 3}, {0: 5}, {0: 3, 1: 2}, {0: 5}, {0: 4}]
-        # # Define the membership flows between neighbouring clusterings
-        # between_flows = [
-        #     {(0, 0): 3},  # key: (from cluster, to cluster), value: size
-        #     {(0, 0): 3, (0, 1): 2},
-        #     {(0, 0): 3, (1, 0): 2},
-        #     {(0, 0): 4}
-        # ]
-        # # set the colors
-        # cluster_color = {0: "C1", 1: "C2"}
-        # # create a dictionary with the time points as keys and a list of clusters
-        # # as values
-        # clustering_sequence = {}
-        # for tp, clustering in enumerate(cluster_sizes):
-        #     clustering_sequence[time_points[tp]] = [
-        #         _Block(
-        #             height=clustering[cid],
-        #             label="{0}".format(cid),
-        #             facecolor=cluster_color[cid],
-        #         ) for cid in clustering
-        #     ]
-        # # now create the flows between the clusters
-        # for tidx, tp in enumerate(time_points[1:]):
-        #     flows = between_flows[tidx]
-        #     for from_csid, to_csid in flows:
-        #         _Flow(
-        #             flow=flows[(from_csid, to_csid)],
-        #             source=clustering_sequence[time_points[tidx]][from_csid],
-        #             target=clustering_sequence[tp][to_csid],
-        #             facecolor='source'
-        #         )
 
     def _add_diagram(self, diagram):
         """
@@ -2345,18 +1679,10 @@ class Alluvial:
             diagram.determine_layout()
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **self._kwargs)
-        for tag in self._tags:
-            # creat a PatchCollection for each tag
-            # tag_zorder = 5
-            tag_collection = None
-            self.ax.add_collection(tag_collection)
-        # create patches for regular flows
-        # create the patches for extout
 
     def finish(self,):
-        # TODO: distribute all blocks in all cols in all diagrams
+        """Draw the Alluvial diagram."""
         self._create_collections()
-        pass
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
@@ -2390,212 +1716,14 @@ class Alluvial:
             return None
 
     def update_tag(self, tag, **kwargs):
-        pass
-
-    def set_dates_xaxis(self, resolution='months'):
-        r"""
-        Format the x axis in case :class:`~datetime.datetime` objects are
-        provide for the horizontal placement of clusters.
-
-        Parameters
-        -----------
-        resolution: str (default='months')
-          Possible values are ``'months'`` and ``'weeks'``.
-          This determines the resolution of the minor ticks via
-          :obj:`~matplotlib.axis.Axis.set_minor_formatter`.
-          The major tick is then either given in years or months.
-
-          .. todo::
-
-            Include further options or allow passing parameters directly to
-            :meth:`~matplotlib.axis.Axis.set_minor_formatter` and
-            :meth:`~matplotlib.axis.Axis.set_major_formatter`.
-
-        """
-        import matplotlib.dates as mdates
-        years = mdates.YearLocator()
-        months = mdates.MonthLocator()
-        weeks = mdates.WeekdayLocator(mdates.MONDAY)
-        if resolution == 'months':
-            monthsFmt = mdates.DateFormatter('%b')
-            yearsFmt = mdates.DateFormatter('\n%Y')  # add space
-            self.ax.xaxis.set_minor_locator(months)
-            self.ax.xaxis.set_minor_formatter(monthsFmt)
-            self.ax.xaxis.set_major_locator(years)
-            self.ax.xaxis.set_major_formatter(yearsFmt)
-        elif resolution == 'weeks':
-            monthsFmt = mdates.DateFormatter('\n%b')
-            weeksFmt = mdates.DateFormatter('%b %d')
-            self.ax.xaxis.set_minor_locator(weeks)
-            self.ax.xaxis.set_minor_formatter(weeksFmt)
-            self.ax.xaxis.set_major_locator(months)
-            self.ax.xaxis.set_major_formatter(monthsFmt)
-
-    def _move_new_clusters(self, x_pos):
-        r"""
-        This method redistributes flows without in-flow so to minimize the
-        vertical displacement of out-flows.
-
-        Parameters
-        -----------
-        x_pos: float
-          The horizontal position where new clusters without in-flow should be
-          distributed. This must be a `key` of the
-          :attr:`~.Alluvial.clusters` attribute.
-
-        Once the clusters are distributed for all x positions this method
-        redistributes within a given x_positions the clusters that have no
-        inflow but out flows. The clusters are moved closer (vertically) to
-        the target clusters of the out flow(es).
-        """
-        old_mid_heights = [
-            cluster.mid_height for cluster in self.clusters[x_pos]
-        ]
-        _redistribute = False
-        for cluster in self.clusters[x_pos]:
-            if sum([_flow.flow for _flow in cluster.inflows]) == 0.0:
-                weights = []
-                positions = []
-                for out_flow in cluster.outflows:
-                    if out_flow.target is not None:
-                        weights.append(out_flow.flow)
-                        positions.append(out_flow.target.mid_height)
-                if sum(weights) > 0.0:
-                    _redistribute = True
-                    cluster.mid_height = sum(
-                        [weights[i] * positions[i] for i in range(len(weights))]
-                    ) / sum(weights)
-        if _redistribute:
-            sort_key = [
-                bisect_left(
-                    old_mid_heights, self.clusters[x_pos][i].mid_height
-                ) for i in range(len(self.clusters[x_pos]))
-            ]
-            cs, _sort_key = zip(
-                *sorted(
-                    zip(
-                        list(range(len(self.clusters[x_pos]))),
-                        sort_key,
-                    ),
-                    key=lambda x: x[1]
-                )
-            )
-            self.clusters[x_pos] = [self.clusters[x_pos][_k] for _k in cs]
-            # redistribute them
-            self._update_ycoords(x_pos, self.cluster_w_spacing)
-
-    # unused
-    def get_patchcollection(
-        self, match_original=True,
-        cluster_kwargs={},
-        flow_kwargs={},
-        *args, **kwargs
-    ):
-        """
-        Gather the patchcollection to add to the axes
-
-        Parameter:
-        ----------
-        :param kwargs:
-            Options:
-        """
-        cluster_patches = []
-        flows = []
-        if cluster_kwargs is None:
-            cluster_kwargs = dict()
-        for x_pos in self.x_positions:
-            out_flows = []
-            for cluster in self.clusters[x_pos]:
-                # TODO: set color
-                # _cluster_color
-                cluster.set_y(cluster.get_y() + self.y_offset)
-                cluster_patches.append(
-                    cluster.get_artist(
-                        **cluster_kwargs
-                    )
-                )
-                # sort the flows for minimal overlap
-                cluster.set_loc_out_flows()
-                cluster.sort_in_flows()
-                cluster.sort_out_flows()
-                cluster.set_anchor_in_flows()
-                cluster.set_anchor_out_flows()
-                out_flows.extend(cluster.outflows)
-            flows.append(out_flows)
-        flow_patches = []
-        for out_flows in flows:
-            for out_flow in out_flows:
-                flow_patches.append(out_flow.get_artist(**flow_kwargs))
-        all_patches = []
-        all_patches.extend(flow_patches)
-        all_patches.extend(cluster_patches)
-        return PatchCollection(
-            all_patches,
-            match_original=match_original,
-            *args, **kwargs
-        )
-
-    def get_labelcollection(self, *args, **kwargs):
-        h_margin = kwargs.pop('h_margin', None)
-        v_margin = kwargs.pop('v_margin', None)
-        if 'horizontalalignment' not in kwargs:
-            kwargs['horizontalalignment'] = 'right'
-        if 'verticalalignment' not in kwargs:
-            kwargs['verticalalignment'] = 'bottom'
-        cluster_labels = []
-        for x_pos in self.x_positions:
-            for cluster in self.clusters[x_pos]:
-                _h_margin = h_margin
-                _v_margin = v_margin
-                if cluster.label_margin:
-                    _h_margin, _v_margin = cluster.label_margin
-                if cluster.label is not None:
-                    # # Options (example):
-                    # 'a polar annotation',
-                    # xy=(thistheta, thisr),  # theta, radius
-                    # xytext=(0.05, 0.05),    # fraction, fraction
-                    # textcoords='figure fraction',
-                    # arrowprops=dict(facecolor='black', shrink=0.05),
-                    cluster_label = {
-                        's': cluster.label,
-                        'xy': (
-                            cluster.x - _h_margin,
-                            cluster.get_y() + _v_margin
-                        )
-                    }
-                    cluster_label.update(kwargs)
-                    cluster_labels.append(cluster_label)
-        return cluster_labels
-
-    def color_clusters(self, patches, colormap=plt.cm.rainbow):
-        r"""
-        *unused*
-
-        Parameters
-        -----------
-        patches: list[:class:`~matplotlib.patches.PathPatch`]
-          Cluster patches to color.
-        colormap: :obj:`matplotlib.cm` (default='rainbow')
-          See the matplotlib tutorial for colormaps
-          (`link <https://matplotlib.org/tutorials/colors/colormaps.html>`_)
-          for details.
-
-        """
-        nbr_clusters = len(patches)
-        c_iter = iter(colormap([i / nbr_clusters for i in range(nbr_clusters)]))
-        for i in range(nbr_clusters):
-            _color = next(c_iter)
-            patches[i].set_facecolor(_color)
-            patches[i].set_edgecolor(_color)
-        return None
+        pass  # TODO
 
 
 class AlluvialHandler:
     def legend_artist(self, legend, orig_handle, fontsize, handlebox):
         x0, y0 = handlebox.xdescent, handlebox.ydescent
         width, height = handlebox.width, handlebox.height
-        # TODO:
-        # construct a simple alluvial diag
+        # TODO: construct a simple alluvial diag
         patch = _Block(height=height, xa=x0, ya=y0, width=width, fc='red',
                        transform=handlebox.get_transform())
         # patch = mpatches.Rectangle([x0, y0], width, height, facecolor='red',

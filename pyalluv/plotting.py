@@ -766,7 +766,7 @@ class _Flow(_ArtistProxy):
             self._set_from_artist(prop, ref_artist)
 
 
-class ProxyCollection(_ArtistProxy):
+class _ProxyCollection(_ArtistProxy):
     """
     A collection of _ArtistProxy with common styling properties.
     """
@@ -967,8 +967,8 @@ class SubDiagram:
         self.y_min, self.y_max = None, None
 
         # TODO: update blockprops with kwargs? at least handle label
-        self._blocks = ProxyCollection(_blocks, label=label,
-                                       **self._blockprops)
+        self._blocks = _ProxyCollection(_blocks, label=label,
+                                        **self._blockprops)
 
         # create the Flows is only based on *flows* and *extout*'s
         _flows = []
@@ -986,7 +986,7 @@ class SubDiagram:
                                         target=t_col[i],
                                         relative_flow=fractionflow))
         # TODO: update flowprops with kwargs and label
-        self._flows = ProxyCollection(_flows, label=label, **self._flowprops)
+        self._flows = _ProxyCollection(_flows, label=label, **self._flowprops)
         self._hspace = hspace
         # TODO: create set_... and process like set_hspace
         self._hspace_combine = hspace_combine

@@ -231,23 +231,19 @@ class _Block(_ArtistProxy):
         return self._ya
 
     def get_bounds(self,):
-        """Return the bounds (x0, y0, x1, y1) of `.Bbox`."""
+        """Return the bounds (x0, y0, width, height) of `.Bbox`."""
         return self._artist.get_bbox().bounds
 
-    def get_height(self, converted=False):
+    def get_height(self):
         """Return the height of the block."""
-        if converted:
-            x0, y0, x1, y1 = self.get_bounds()
-            return y1 - y0
-        return self._height
-
-    def get_width(self, converted=False):
-        """Return the width of the block."""
-        if converted:
-            x0, y0, x1, y1 = self.get_bounds()
-            return x1 - x0
+        if self._artist is not None:
+            return self._artist.get_height()
         else:
-            return self._artist.get_width()
+            return self._height
+
+    def get_width(self):
+        """Return the width of the block."""
+        return self._artist.get_width()
 
     def get_anchor(self,):
         """Return the anchor point of the block."""
@@ -538,26 +534,17 @@ class _Block(_ArtistProxy):
         return anchor_in, top_in
 
     def get_inloc(self,):
-        if self._artist is not None:
-            x0, y0, x1, y1 = self.get_bounds()
-        else:
-            x0, y0 = self.get_xy()
-            y1 = y0 + self.get_height()
+        x0, y0, width, height = self.get_bounds()
         return {'bottom': (x0, y0),  # left, bottom
-                'top': (x0, y1)}  # left, top
+                'top': (x0, y0 + height)}  # left, top
 
     def get_outloc(self,):
         # _width = self.get_width()
-        if self._artist is not None:
-            x0, y0, x1, y1 = self.get_bounds()
-        else:
-            x0, y0 = self.get_xy()
-            x1 = x0 + self.get_width()
-            y1 = y0 + self.get_height()
+        x0, y0, width, height = self.get_bounds()
         # return {'top': (x0 + _width, y0 + self.get_height()),  # top right
         #         'bottom': (x0 + _width, y0)}  # right, bottom
-        return {'top': (x1, y1),  # top right
-                'bottom': (x1, y0)}  # right, bottom
+        return {'top': (x0 + width, y0 + height),  # top right
+                'bottom': (x0 + width, y0)}  # right, bottom
 
     def handle_flows(self,):
         self._set_loc_out_flows()
@@ -688,13 +675,9 @@ class _Flow(_ArtistProxy):
         self._artist._transformSet = other.is_transform_set()
 
     def _get_dimensions(self,):
-        """Return the dimensions (widht and height) of the linked Proxies."""
-        sbounds = self.source.get_bounds()
-        swidth = sbounds[2] - sbounds[0]
-        sheight = sbounds[3] - sbounds[1]
-        tbounds = self.target.get_bounds()
-        twidth = tbounds[2] - tbounds[0]
-        theight = tbounds[3] - tbounds[1]
+        """Return the dimensions (width and height) of the linked Proxies."""
+        _sx0, _sy0, swidth, sheight = self.source.get_bounds()
+        _tx0, _ty0, twidth, theight = self.target.get_bounds()
         return (swidth, sheight), (twidth, theight)
 
     # TODO: needs updating (no modifications of kwargs)
@@ -728,6 +711,7 @@ class _Flow(_ArtistProxy):
                 raise Exception('flow with neither source nor target cluster')
 
         # now complete the path points
+        print(self.anchor_out, self.anchor_in)
         if self.anchor_out is not None:
             anchor_out_inner = (self.anchor_out[0] - 0.5 * _sw,
                                 self.anchor_out[1])

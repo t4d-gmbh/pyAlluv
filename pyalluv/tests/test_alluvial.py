@@ -59,7 +59,7 @@ class TestAlluvial:
     def test_simple_alluvial(self, ext, flows, fractionflow, columns, layout):
         # test creation of alluvial via __init__ directly.
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
-                            layout=layout)
+                            layout=layout, width=1)
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
                                   columns, layout=layout)
 
@@ -69,7 +69,7 @@ class TestAlluvial:
         # test creation of alluvial diagram with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
-                     layout=layout)
+                     layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
@@ -81,9 +81,9 @@ class TestAlluvial:
         # several sub diagrams with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
-                     layout=layout)
+                     layout=layout, width=1)
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow, yoff=2,
-                     layout=layout)
+                     layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),

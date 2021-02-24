@@ -1,8 +1,10 @@
 import logging
 import numpy as np
+from matplotlib.cbook import index_of
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
 from matplotlib import cbook
+from matplotlib.artist import Artist
 # from matplotlib import transforms
 # from matplotlib import _api
 import matplotlib.pyplot as plt
@@ -57,10 +59,7 @@ class _ArtistProxy:
     This class assembles the common properties and relation to :class:`Patch`
     of the elements present in an Alluvial diagram.
     """
-    _artistcls = None  # derived must overwrite
-    _alias_map = getattr(_artistcls, "_alias_map", {})
-    _sty_reduce_alias = {alias: p for p, aliases in _alias_map.items()
-                         for alias in aliases}
+    _artistcls = Artist  # derived must overwrite
 
     def __init__(self, label=None, **kwargs):
         """
@@ -68,7 +67,9 @@ class _ArtistProxy:
         self.stale = True
         self._tags = []
         self._artist = None
-        self._kwargs = kwargs
+        # keep artist specific kwargs in canonical form only
+        self._original_kwargs = dict(kwargs)
+        self._kwargs = cbook.normalize_kwargs(kwargs, self._artistcls)
 
     def set_tags(self, tags: list):
         """Set a tag for the block."""
@@ -97,8 +98,7 @@ class _ArtistProxy:
         """Set the styling of the element."""
 
         self._original_kwargs = dict(props)
-        self._kwargs = {self._sty_reduce_alias.get(k, k): v
-                        for k, v in props.items()}
+        self._kwargs = cbook.normalize_kwargs(props, self._artistcls)
 
     def get_styling(self, original=False):
         """Return the custom styling properties of this element."""
@@ -122,33 +122,46 @@ class _ArtistProxy:
             with the name provided in *prop*.
 
         """
-        # OLD:
-        # return self._kwargs.get(prop, self._original_kwargs.get(prop, altval))
-        # if prop in self._kwargs get it
-        _prop = self._sty_reduce_alias.get(prop, prop)
-        if _prop in self._kwargs:
-            return self._kwarg[_prop]
-        # if not but there are tags, get it from the tags
-        # TODO: check if the prop is present in any of self._tags
-        # if not in tags or no tags return altval
-        return altval
+        # # OLD:
+        # _prop = self._sty_reduce_alias.get(prop, prop)
+        # if _prop in self._kwargs:
+        #     return self._kwarg[_prop]
+        # # if not but there are tags, get it from the tags
+        # # TODO: check if the prop is present in any of self._tags
+        # # if not in tags or no tags return altval
+        # return altval
+        return self._kwargs.get(prop, self._original_kwargs.get(prop, altval))
 
     @property
     def is_styled(self,):
         """Indicate if this element has custom styling."""
         return True if self.is_tagged or self._kwargs else False
 
-    def _create_artist(self, **kwargs):
-        """Initiate the patch."""
+    def _create_artist(self, ax, **kwargs):
+        """Initiate the artist and attach it to the axes."""
         raise NotImplementedError('Derived must override')
 
-    def create_artist(self, **kwargs):
+    def _applicable_properties(self, props):
+        applicable = dict()
+        for k, v in props.items():
+            func = getattr(self._artistcls, f"set_{k}", None)
+            if not callable(func):
+                # do a warning?
+                _log.warning(f"{self._artistcls.__name__!r} object "
+                             f"has no property {k!r}")
+            else:
+                applicable[k] = v
+        return applicable
+
+    def create_artist(self, ax, **kwargs):
         """
         Create the patch (or collection) for this element and return whether
         the element has individual styling or not.
         """
-        _kwargs = self._update_styling(kwargs)
-        self._create_artist(**_kwargs)
+        _kwargs = cbook.normalize_kwargs(kwargs, self._artistcls)
+        _kwargs.update(self._kwargs)
+        _kwargs = self._applicable_properties(_kwargs)
+        self._create_artist(ax, **_kwargs)
         self.stale = False
 
     def get_artist(self,):
@@ -161,29 +174,6 @@ class _ArtistProxy:
         if self.stale:
             raise ValueError("The artist has not been created.")
         return self._artist
-
-    def _update_styling(self, props: dict):
-        """
-        Update styling properties with the styling properties attached to this
-        element.
-
-        Parameters
-        ----------
-        props : dict
-            The dictionary that will be updated in place with *self._kwargs*.
-
-        Returns
-        -------
-        updated_props : dict
-            A copy of *props* updated with *self._kwargs*.
-        """
-        # get rid of aliases in the provided props
-        _props = {self._sty_reduce_alias.get(k, k): v for k, v
-                  in props.items()}
-        # new_props = {self._sty_reduce_alias.get(k, k): v
-        #              for k, v in self._kwargs.items() if v is not None}
-        _props.update(self._kwargs)
-        return _props
 
 
 @cbook._define_aliases({
@@ -207,7 +197,7 @@ class _Block(_ArtistProxy):
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
-    def __init__(self, height, xa=None, ya=None, width=1.0, label=None,
+    def __init__(self, height, xa=None, ya=None, label=None,
                  tag=None, horizontalalignment='left',
                  verticalalignment='bottom', label_margin=(0, 0),
                  pathprops=None, **kwargs):
@@ -220,7 +210,7 @@ class _Block(_ArtistProxy):
           The x coordinate of the block's anchor point.
         ya: scalar, optional
           The y coordinate of the block's anchor point.
-        width : float,  default: 1.0
+        width : float,  optional
           Block width.
         label : str, optional
           Block label that can be displayed in the diagram.
@@ -237,7 +227,7 @@ class _Block(_ArtistProxy):
 
         Other Parameters
         ----------------
-        **kwargs : Allowed are all `.Patch` properties:
+        **kwargs : Allowed are all `.Rectangle` properties:
 
           %(Patch_kwdoc)s
 
@@ -251,7 +241,6 @@ class _Block(_ArtistProxy):
             self._height = height
         self._xa = xa
         self._ya = ya
-        self._width = width
         self._set_horizontalalignment(horizontalalignment)
         self._set_verticalalignment(verticalalignment)
         # init the in and out flows:
@@ -273,13 +262,20 @@ class _Block(_ArtistProxy):
         """Return the y coordinate of the anchor point."""
         return self._ya
 
-    def get_height(self):
+    def get_height(self, converted=False):
         """Return the height of the block."""
+        if converted:
+            x0, y0, x1, y1 = self.get_limits()
+            return y1 - y0
         return self._height
 
-    def get_width(self):
+    def get_width(self, converted=False):
         """Return the width of the block."""
-        return self._width
+        if converted:
+            x0, y0, x1, y1 = self.get_limits()
+            return x1 - x0
+        else:
+            return self._artist.get_width()
 
     def get_anchor(self,):
         """Return the anchor point of the block."""
@@ -289,9 +285,9 @@ class _Block(_ArtistProxy):
         """Return the left coordinate of the block."""
         x0 = self._xa
         if self._horizontalalignment == 'center':
-            x0 -= 0.5 * self._width
+            x0 -= 0.5 * self.get_width()
         elif self._horizontalalignment == 'right':
-            x0 -= self._width
+            x0 -= self.get_width()
         return x0
 
     def get_y(self):
@@ -309,7 +305,7 @@ class _Block(_ArtistProxy):
 
     def get_xc(self, ):
         """Return the y coordinate of the block's center."""
-        return self.get_x() + 0.5 * self._height
+        return self.get_x() + 0.5 * self.get_width()
 
     def get_yc(self, ):
         """Return the y coordinate of the block's center."""
@@ -330,20 +326,12 @@ class _Block(_ArtistProxy):
 
     def set_xa(self, xa):
         """Set the x coordinate of the anchor point."""
-        _update_locs = xa is not None and self._xa != xa
         self._xa = xa
-        if _update_locs:
-            self._set_inloc()
-            self._set_outloc()
         self.stale = True
 
     def set_ya(self, ya):
         """Set the y coordinate of the anchor point."""
-        _update_locs = ya is not None and self._ya != ya
         self._ya = ya
-        if _update_locs:
-            self._set_inloc()
-            self._set_outloc()
         self.stale = True
 
     def set_y(self, y):
@@ -372,8 +360,7 @@ class _Block(_ArtistProxy):
 
     def set_width(self, width):
         """Set the width of the block."""
-        self._width = width
-        self.stale = True
+        self._artist.set_width(width)
 
     def set_height(self, height):
         """Set the height of the block."""
@@ -405,19 +392,11 @@ class _Block(_ArtistProxy):
 
     def set_horizontalalignment(self, align):
         """Set the horizontal alignment of the anchor point and the block."""
-        _ha = self._horizontalalignment
         self._set_horizontalalignment(self, align)
-        if _ha != self._horizontalalignment:
-            self._set_inloc()
-            self._set_outloc()
 
     def set_verticalalignment(self, align):
         """Set the vertical alignment of the anchor point and the block."""
-        _va = self._verticalalignment
         self._set_verticalalignment(align)
-        if _va != self._verticalalignment:
-            self._set_inloc()
-            self._set_outloc()
 
     def set_outflows(self, outflows):
         self._outflows = outflows
@@ -524,29 +503,26 @@ class _Block(_ArtistProxy):
     #     doc="y coordinate of the block's center."
     # )
 
-    def _create_artist(self, **kwargs):
+    def _create_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
-        # TODO: maybe use the more generic _artist?
-        self._artist = self._artistcls(self.get_xy(), self._width,
-                                       self._height, **kwargs)
+        self._artist = ax.add_patch(self._artistcls(self.get_xy(),
+                                    height=self._height, **kwargs))
 
     def update_locations(self,):
         # TODO: this needs to be called AFTER self._artist has been attached to
         # an axis
         x0, y0, x1, y1 = self._artist._convert_units()
-        # Use x0, y0, x1, y1 to set outloc and inloc
-        self._set_outloc()
-        self._set_inloc()
 
-    def set_loc_out_flows(self,):
+    def _set_loc_out_flows(self,):
         yc = self.get_yc()
         for out_flow in self._outflows:
             in_loc = None
             out_loc = None
             if out_flow.target is not None:
+                target_inloc = out_flow.target.get_inloc()
                 if yc > out_flow.target.get_yc():
                     # draw to top
-                    if yc >= out_flow.target.inloc['top'][1]:
+                    if yc >= target_inloc['top'][1]:
                         # draw from bottom to in top
                         out_loc = 'bottom'
                         in_loc = 'top'
@@ -556,7 +532,7 @@ class _Block(_ArtistProxy):
                         in_loc = 'top'
                 else:
                     # draw to bottom
-                    if yc <= out_flow.target.inloc['bottom'][1]:
+                    if yc <= target_inloc['bottom'][1]:
                         # draw from top to bottom
                         out_loc = 'top'
                         in_loc = 'bottom'
@@ -569,7 +545,7 @@ class _Block(_ArtistProxy):
             out_flow.in_loc = in_loc
             out_flow.out_loc = out_loc
 
-    def sort_out_flows(self,):
+    def _sort_out_flows(self,):
         _top_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
@@ -605,7 +581,7 @@ class _Block(_ArtistProxy):
         sorted_idx = list(sorted_top_idx) + list(sorted_bottom_idx)
         self._outflows = [self._outflows[i] for i in sorted_idx]
 
-    def sort_in_flows(self,):
+    def _sort_in_flows(self,):
         _top_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
@@ -642,74 +618,88 @@ class _Block(_ArtistProxy):
         self._inflows = [self._inflows[i] for i in sorted_idx]
 
     def get_loc_out_flow(self, flow_width, out_loc, in_loc):
+        outloc = self.get_outloc()
         anchor_out = (
-            self.outloc[out_loc][0],
-            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'bottom' else 0)
+            outloc[out_loc][0],
+            outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'bottom' else 0)
         )
         top_out = (
-            self.outloc[out_loc][0],
-            self.outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'top' else 0)
+            outloc[out_loc][0],
+            outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'top' else 0)
         )
         self.out_margin[out_loc] += flow_width
         return anchor_out, top_out
 
-    def set_anchor_out_flows(self,):
+    def _set_anchor_out_flows(self,):
         for out_flow in self._outflows:
-            out_width = out_flow.flow_width \
-                if out_flow.out_loc == 'bottom' else - out_flow.flow_width
+            out_width = out_flow.flow \
+                if out_flow.out_loc == 'bottom' else - out_flow.flow
             out_flow.anchor_out, out_flow.top_out = self.get_loc_out_flow(
                 out_width, out_flow.out_loc, out_flow.in_loc
             )
 
-    def set_anchor_in_flows(self,):
+    def _set_anchor_in_flows(self,):
         for in_flow in self._inflows:
-            in_width = in_flow.flow_width \
-                if in_flow.in_loc == 'bottom' else - in_flow.flow_width
+            in_width = in_flow.flow \
+                if in_flow.in_loc == 'bottom' else - in_flow.flow
             in_flow.anchor_in, in_flow.top_in = self.get_loc_in_flow(
                 in_width, in_flow.out_loc, in_flow.in_loc
             )
 
     def get_loc_in_flow(self, flow_width, out_loc, in_loc):
+        inloc = self.get_inloc()
         anchor_in = (
-            self.inloc[in_loc][0],
-            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'bottom' else 0)
+            inloc[in_loc][0],
+            inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'bottom' else 0)
         )
         top_in = (
-            self.inloc[in_loc][0],
-            self.inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'top' else 0)
+            inloc[in_loc][0],
+            inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'top' else 0)
         )
         self.in_margin[in_loc] += flow_width
         return anchor_in, top_in
 
-    def _set_inloc(self,):
-        x0, y0 = self.get_xy()
-        self.inloc = {
-            'bottom': (x0, y0),  # left, bottom
-            'top': (x0, y0 + self._height)  # left, top
-        }
+    def get_limits(self,):
+        return self._artist._convert_units()
 
-    def _set_outloc(self,):
-        x0, y0 = self.get_xy()
-        self.outloc = {
-            # right, top
-            'top': (x0 + self._width, y0 + self._height),
-            'bottom': (x0 + self._width, y0)  # right, bottom
-        }
+    def get_inloc(self,):
+        if self._artist is not None:
+            x0, y0, x1, y1 = self.get_limits()
+        else:
+            x0, y0 = self.get_xy()
+            y1 = y0 + self.get_height()
+        return {'bottom': (x0, y0),  # left, bottom
+                'top': (x0, y1)}  # left, top
+
+    def get_outloc(self,):
+        # _width = self.get_width()
+        if self._artist is not None:
+            x0, y0, x1, y1 = self.get_limits()
+        else:
+            x0, y0 = self.get_xy()
+            x1 = x0 + self.get_width()
+            y1 = y0 + self.get_height()
+        # return {'top': (x0 + _width, y0 + self.get_height()),  # top right
+        #         'bottom': (x0 + _width, y0)}  # right, bottom
+        return {'top': (x1, y1),  # top right
+                'bottom': (x1, y0)}  # right, bottom
+
+    def handle_flows(self,):
+        self._set_loc_out_flows()
+        self._sort_in_flows()
+        self._sort_out_flows()
+        self._set_anchor_in_flows()
+        self._set_anchor_out_flows()
 
 
-@cbook._define_aliases({
-    "edgecolor": ["ec"],
-    "facecolor": ["fc"],
-})
-class _Flow:
+class _Flow(_ArtistProxy):
     """
     A connection between two blocks from adjacent columns.
     """
-    def __init__(
-            self, flow,
-            source=None, target=None,
-            relative_flow=False,
-            **kwargs):
+    _artistcls = patches.PathPatch
+
+    def __init__(self, flow, source=None, target=None, relative_flow=False,
+                 label=None, **kwargs):
         """
 
         Parameters
@@ -733,168 +723,200 @@ class _Flow:
         particular values `'source'` (or `'s'`), `'target'` (or `'t'`) and
         `'interpolate'`.
 
-        kwargs from old implementation
-
-          interpolation_steps:
-
-          out_flow_vanish: str (default='top')
-
-          default_fc: (default='gray')
-
-          default_ec: (default='gray')
-
-          default_alpha: int (default=0.3)
-
-          closed
-          readonly
-          facecolors
-          edgecolors
-          linewidths
-          linestyles
-          antialiaseds
-
-        Attributes
-        -----------
-
-        flow: float
-          The size of the flow which will translate to the height of the flow in
-          the Alluvial diagram.
-        source: :class:`pyalluv.clusters.Cluster` (default=None)
-          Cluster from which the flow originates.
-        target: :class:`pyalluv.clusters.Cluster` (default=None)
-          Cluster into which the flow leads.
+        By default *edgecolor* and *facecolor* are set to `lightgray`.
         """
-        self._interp_steps = kwargs.pop('interpolation_steps', 1)
+        # self._interp_steps = kwargs.pop('interpolation_steps', 1)
         self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
-        self.default_fc = kwargs.pop('default_fc', 'gray')
-        self.default_ec = kwargs.pop('default_ec', 'gray')
-        self.default_alpha = kwargs.pop('default_alpha', 0.3)
+        # self.default_fc = kwargs.pop('default_fc', 'gray')
+        self.default_fc = 'gray'
+        # self.default_ec = kwargs.pop('default_ec', 'gray')
+        self.default_ec = 'gray'
+        # self.default_alpha = kwargs.pop('default_alpha', 0.3)
         # self.default_alpha = kwargs.pop(
         #         'default_alpha',
         #         kwargs.get('alpha', {}).pop('default', 0.3)
         #         )
-        self.closed = kwargs.pop('closed', False)
-        self.readonly = kwargs.pop('readonly', False)
-        self.patch_kwargs = kwargs
-        self.patch_kwargs['lw'] = self.patch_kwargs.pop(
-            'linewidth', self.patch_kwargs.pop('lw', 0.0)
-        )
+        self.default_alpha = 1.0
 
-        if isinstance(flow, (list, tuple)):
-            self.flow = len(flow)
-        else:
-            self.flow = flow
+        super().__init__(label=label, **kwargs)
+
+        self._kwargs = kwargs
+
+        # TODO: needs to be deleted
+        # self._kwargs['lw'] = self._kwargs.pop(
+        #     'linewidth', self._kwargs.pop('lw', 0.0)
+        # )
+
+        # if isinstance(flow, (list, tuple)):
+        #     self.flow = len(flow)
+        # else:
+        #     self.flow = flow
+
         self.relative_flow = relative_flow
         self.source = source
         self.target = target
+        self._original_flow = flow
+        # TODO: bad implementation
         if self.source is not None:
             if self.relative_flow:
-                self.flow_width = self.flow * self.source.get_height()
+                self.flow = flow * self.source.get_height()
             else:
-                self.flow_width = self.flow
+                self.flow = flow
         else:
             if self.target is not None:
                 if self.relative_flow:
-                    self.flow_width = self.flow * self.target.get_height()
+                    self.flow = flow * self.target.get_height()
                 else:
-                    self.flow_width = self.flow
-        # append the flow to the clusters
+                    self.flow = flow
+            else:
+                self.flow = flow
+
         if self.source is not None:
             self.source.add_outflow(self)
         if self.target is not None:
             self.target.add_inflow(self)
         self.stale = True
 
-    def create_patch(self, **kwargs):
-        _kwargs = dict(kwargs)
-        _to_in_kwargs = {}
-        _to_out_kwargs = {}
-        for kw in _kwargs:
-            if kw.startswith('in_'):
-                _to_in_kwargs[kw[3:]] = _kwargs.pop(kw)
-            elif kw.startswith('out_'):
-                _to_out_kwargs[kw[3:]] = _kwargs.pop(kw)
-        # update with flow specific styling
-        _kwargs.update(self.patch_kwargs)
-        for _color in ['facecolor', 'edgecolor']:
-            _set_color = _kwargs.pop(_color, None)
-            _set_alpha = _kwargs.pop('alpha', None)
-            if isinstance(_set_alpha, (int, float)):
-                _kwargs['alpha'] = _set_alpha
-                _set_alpha = None
-            color_is_set = False
-            if _set_color == 'source' or _set_color == 'cluster':
-                from_cluster = self.source
-                color_is_set = True
-            elif _set_color == 'target':
-                from_cluster = self.target
-                color_is_set = True
-            elif isinstance(_set_color, str) and '__' in _set_color:
-                which_cluster, flow_type = _set_color.split('__')
-                if which_cluster == 'target':
-                    from_cluster = self.target
-                else:
-                    from_cluster = self.source
-                if flow_type == 'migration' \
-                        and self.source.patch_kwargs.get(_color) \
-                        != self.target.patch_kwargs.get(_color):
-                    color_is_set = True
-                    if _set_alpha:
-                        _kwargs['alpha'] = _set_alpha.get(
-                            'migration', _set_alpha.get('default', self.default_alpha)
-                        )
-                elif flow_type == 'reside'  \
-                        and self.source.patch_kwargs.get(_color) \
-                        == self.target.patch_kwargs.get(_color):
-                    color_is_set = True
-                    if _set_alpha:
-                        _kwargs['alpha'] = _set_alpha.get(
-                            'reside', _set_alpha.get('default', self.default_alpha)
-                        )
-                else:
-                    _set_color = None
-            if color_is_set:
-                _kwargs[_color] = from_cluster.patch_kwargs.get(
-                    _color, None
-                )
+    def _set_from_artist(self, attr, artist):
+        name = '_%s' % attr
+        setattr(self._artist, name, getattr(artist, name))
 
-            # set it back
-            else:
-                _kwargs[_color] = _set_color
-                if _set_color is None:
-                    if _color == 'facecolor':
-                        _kwargs[_color] = self.default_fc
-                    elif _color == 'edgecolor':
-                        _kwargs[_color] = self.default_ec
-                if _set_alpha:
-                    _kwargs['alpha'] = _set_alpha.get('default', self.default_alpha)
-        # line below is probably not needed as alpha is set with the color
-        _kwargs['alpha'] = _kwargs.get('alpha', self.default_alpha)
-        # set in/out only flow styling
-        _in_kwargs = dict(_kwargs)
-        _in_kwargs.update(_to_in_kwargs)
-        _out_kwargs = dict(_kwargs)
-        _out_kwargs.update(_to_out_kwargs)
+    def _update_artist_from(self, other):
+        # For some properties we don't need or don't want to go through the
+        # getters/setters, so we just copy them directly.
+        self._artist._transform = other._transform
+        self._artist._transformSet = other._transformSet
+        self._artist._visible = other._visible
+        self._artist._alpha = other._alpha
+        self._artist.clipbox = other.clipbox
+        self._artist._clipon = other._clipon
+        self._artist._clippath = other._clippath
+        # self._label = other._label
+        self._artist._sketch = other._sketch
+        self._artist._path_effects = other._path_effects
+        self._artist.sticky_edges.x[:] = other.sticky_edges.x.copy()
+        self._artist.sticky_edges.y[:] = other.sticky_edges.y.copy()
+        self._artist.pchanged()
+        self._artist._edgecolor = other._edgecolor
+        self._artist._facecolor = other._facecolor
+        self._artist._original_edgecolor = other._original_edgecolor
+        self._artist._original_facecolor = other._original_facecolor
+        self._artist._fill = other._fill
+        self._artist._hatch = other._hatch
+        self._artist._hatch_color = other._hatch_color
+        # copy the unscaled dash pattern
+        self._artist._us_dashes = other._us_dashes
+        self._artist.set_linewidth(other._linewidth)  # also sets dash properties
+        self._artist.set_transform(other.get_data_transform())
+        # If the transform of other needs further initialization, then it will
+        # be the case for this artist too.
+        self._artist._transformSet = other.is_transform_set()
+
+    # TODO: needs updating (no modifications of kwargs)
+    def _create_artist(self, ax, **kwargs):
+        _ref_properties = {}
+        for coloring in ['edgecolor', 'facecolor', 'color']:
+            color = kwargs.pop(coloring, None)
+            if color == 'source':
+                _ref_properties[coloring] = self.source
+            elif color == 'target':
+                _ref_properties[coloring] = self.target
+            elif color == 'interpolate':
+                # TODO
+                _ref_properties[coloring] = None
+
+        # _to_in_kwargs = {}
+        # _to_out_kwargs = {}
+        # for kw in kwargs:
+        #     if kw.startswith('in_'):
+        #         _to_in_kwargs[kw[3:]] = kwargs.pop(kw)
+        #     elif kw.startswith('out_'):
+        #         _to_out_kwargs[kw[4:]] = kwargs.pop(kw)
+        # # update with flow specific styling
+        # kwargs.update(self._kwargs)
+        # for _color in ['facecolor', 'edgecolor']:
+        #     _set_color = kwargs.pop(_color, None)
+        #     _set_alpha = kwargs.pop('alpha', None)
+        #     if isinstance(_set_alpha, (int, float)):
+        #         kwargs['alpha'] = _set_alpha
+        #         _set_alpha = None
+        #     color_is_set = False
+        #     if _set_color == 'source' or _set_color == 'cluster':
+        #         from_cluster = self.source
+        #         color_is_set = True
+        #     elif _set_color == 'target':
+        #         from_cluster = self.target
+        #         color_is_set = True
+        #     elif isinstance(_set_color, str) and '__' in _set_color:
+        #         which_cluster, flow_type = _set_color.split('__')
+        #         if which_cluster == 'target':
+        #             from_cluster = self.target
+        #         else:
+        #             from_cluster = self.source
+        #         if flow_type == 'migration' \
+        #                 and self.source._kwargs.get(_color) \
+        #                 != self.target._kwargs.get(_color):
+        #             color_is_set = True
+        #             if _set_alpha:
+        #                 kwargs['alpha'] = _set_alpha.get(
+        #                     'migration',
+        #                     _set_alpha.get('default', self.default_alpha)
+        #                 )
+        #         elif flow_type == 'reside'  \
+        #                 and self.source._kwargs.get(_color) \
+        #                 == self.target._kwargs.get(_color):
+        #             color_is_set = True
+        #             if _set_alpha:
+        #                 kwargs['alpha'] = _set_alpha.get(
+        #                     'reside',
+        #                     _set_alpha.get('default', self.default_alpha)
+        #                 )
+        #         else:
+        #             _set_color = None
+        #     if color_is_set:
+        #         kwargs[_color] = from_cluster._kwargs.get(
+        #             _color, None
+        #         )
+
+        #     # set it back
+        #     else:
+        #         kwargs[_color] = _set_color
+        #         if _set_color is None:
+        #             if _color == 'facecolor':
+        #                 kwargs[_color] = self.default_fc
+        #             elif _color == 'edgecolor':
+        #                 kwargs[_color] = self.default_ec
+        #         if _set_alpha:
+        #             kwargs['alpha'] = _set_alpha.get('default',
+        #                                              self.default_alpha)
+        # # line below is probably not needed as alpha is set with the color
+        # kwargs['alpha'] = kwargs.get('alpha', self.default_alpha)
+        # # set in/out only flow styling
+        # _in_kwargs = dict(kwargs)
+        # _in_kwargs.update(_to_in_kwargs)
+        # _out_kwargs = dict(kwargs)
+        # _out_kwargs.update(_to_out_kwargs)
 
         _dist = None
         if self.out_loc is not None:
             if self.in_loc is not None:
                 _dist = 2 / 3 * (
-                    self.target.in_['bottom'][0] - self.source.outloc['bottom'][0]
+                    self.target.get_inloc()['bottom'][0] - self.source.get_outloc()['bottom'][0]
                 )
             else:
-                _dist = 2 * self.source.get_width()
-                _kwargs = _out_kwargs
+                _dist = 2 * self.source.get_width(converted=True)
+                # kwargs = _out_kwargs
         else:
             if self.in_loc is not None:
-                _kwargs = _in_kwargs
+                # kwargs = _in_kwargs
+                pass
             else:
                 raise Exception('flow with neither source nor target cluster')
 
         # now complete the path points
         if self.anchor_out is not None:
             anchor_out_inner = (
-                self.anchor_out[0] - 0.5 * self.source.get_width(),
+                self.anchor_out[0] - 0.5 * self.source.get_width(converted=True),
                 self.anchor_out[1]
             )
             dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
@@ -905,7 +927,7 @@ class _Flow:
             pass
         if self.top_out is not None:
             top_out_inner = (
-                self.top_out[0] - 0.5 * self.source.get_width(),
+                self.top_out[0] - 0.5 * self.source.get_width(converted=True),
                 self.top_out[1]
             )
             # 2nd point 2/3 of distance between clusters
@@ -917,7 +939,7 @@ class _Flow:
             pass
         if self.anchor_in is not None:
             anchor_in_inner = (
-                self.anchor_in[0] + 0.5 * self.target.get_width(),
+                self.anchor_in[0] + 0.5 * self.target.get_width(converted=True),
                 self.anchor_in[1]
             )
             dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
@@ -928,7 +950,7 @@ class _Flow:
             pass
         if self.top_in is not None:
             top_in_inner = (
-                self.top_in[0] + 0.5 * self.target.get_width(),
+                self.top_in[0] + 0.5 * self.target.get_width(converted=True),
                 self.top_in[1]
             )
             dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
@@ -954,41 +976,48 @@ class _Flow:
             Path.LINETO, Path.LINETO,
             Path.CLOSEPOLY
         ]
-        _path = Path(vertices, codes, self._interp_steps, self.closed, self.readonly)
+        # TODO: not sure about these values
+        closed = True
+        readonly = True
+        interp_steps = 1
+        _path = Path(vertices, codes, interp_steps, closed, readonly)
 
         # flow_patch = patches.PathPatch(_path, **_kwargs)
-        # return flow_patch
-        self._patch = patches.PathPatch(_path, **_kwargs)
 
-    # TODO: ideally setting ec and fc should not happen in this class, only
-    # special colors should be converted
-    def set_edgecolor(self, color):
-        if color in ['source', 'target', 's', 't', 'interpolate']:
-            # get the color form source or target
-            # or
-            # make this flux use a patchcollection with a linearsegment cmap
-            pass
-        # TODO: replace the same keyword in self._kwargs with an actual color
-        # that can be passed to PathPatch
-        pass
+        # # return flow_patch
+        # self._artist = patches.PathPatch(_path, **kwargs)
+        # # finally attach the artist
+        # ax.add_patch(self._artist)
 
-    def set_facecolor(self, color):
-        pass
+        self._artist = ax.add_patch(self._artistcls(_path, **kwargs))
+        for prop, ref_artist in _ref_properties.items():
+            self._set_from_artist(prop, ref_artist)
 
-    def get_patch(self):
-        if self.stale:
-            self.create_patch()
-            self.stale = False
-        return self._patch
+    # # TODO: ideally setting ec and fc should not happen in this class, only
+    # # special colors should be converted
+    # def set_edgecolor(self, color):
+    #     if color in ['source', 'target', 's', 't', 'interpolate']:
+    #         # get the color form source or target
+    #         # or
+    #         # make this flux use a patchcollection with a linearsegment cmap
+    #         pass
+    #     # TODO: replace the same keyword in self._kwargs with an actual color
+    #     # that can be passed to PathPatch
+    #     pass
+
+    # def set_facecolor(self, color):
+    #     pass
 
 
-class BlockCollection(_ArtistProxy):
+class ProxyCollection(_ArtistProxy):
     """
-    A collection of Blocks with common styling properties.
+    A collection of _ArtistProxy with common styling properties.
     """
     _artistcls = PatchCollection
+    _singular_props = ['zorder', 'hatch', 'pickradius', 'capstyle',
+                       'joinstyle']
 
-    def __init__(self, blocks, label=None, **kwargs):
+    def __init__(self, proxies, label=None, **kwargs):
         """
         Parameters
         ----------
@@ -997,6 +1026,7 @@ class BlockCollection(_ArtistProxy):
         label : str, optional
             Label of the collection.
         """
+        # TODO: cmap does not work with datetime as x axis yet...
         # get cmap data:
         self._cmap_data = kwargs.pop('cmap_array', None)
         if self._cmap_data is not None:
@@ -1005,8 +1035,8 @@ class BlockCollection(_ArtistProxy):
 
         super().__init__(label=label, **kwargs)
 
-        # TODO: make sure that blocks is correct
-        self._blocks = blocks
+        # TODO: this can be more generally just a ArtistProxy
+        self._proxies = proxies
 
         # ###
         # Below is from SubDiagram.__init__
@@ -1024,11 +1054,9 @@ class BlockCollection(_ArtistProxy):
         #     kwargs['linestyles'] = [b.get_linestyle() for b in self._blocks]
         #     kwargs['antialiaseds'] = [b.get_antialiased() for b in self._blocks]
 
-        # TODO: below attributes need to be handled
-        self._redistribute_vertically = 4
-        self.y_min, self.y_max = None, None
-
         # ###
+    def __iter__(self):
+        return iter(self._proxies)
 
     def to_element_styling(self, styleprops: dict):
         """
@@ -1036,10 +1064,23 @@ class BlockCollection(_ArtistProxy):
         """
         indiv_props = dict()
         for k, v in styleprops.items():
-            indiv_props[k] = [b.get_styling_prop(k, v) for b in self._blocks]
+            if k not in self._singular_props:
+                indiv_props[k] = [p.get_styling_prop(k, v)
+                                  for p in self._proxies]
+            else:
+                indiv_props[k] = v
         return indiv_props
 
-    def _create_artist(self, **kwargs):
+    def create_artist(self, ax, **kwargs):
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        for proxy in self._proxies:
+            # do not allow to pass kws to patch here.
+            # block.create_artist(**_kwargs)
+            proxy.create_artist(ax=ax, **_kwargs)
+        super().create_artist(ax=ax, **kwargs)
+
+    def _create_artist(self, ax, **kwargs):
         """
         Creates `.PatchCollections`s for the blocks in this collection.
 
@@ -1047,32 +1088,24 @@ class BlockCollection(_ArtistProxy):
         ----------
 
         """
-        # remove the cmap as this will not fly with block.create_artist
-        cmap = kwargs.pop('cmap', None)
-        for block in self._blocks:
-            # do not allow to pass kws to patch here.
-            # block.create_artist(**_kwargs)
-            # TODO: if block has no other tag
-            block.create_artist(**kwargs)
         match_original = False
-        if any(block.is_styled for block in self._blocks):
+        if any(proxy.is_styled for proxy in self._proxies):
             match_original = True
         if match_original:
             kwargs = self.to_element_styling(kwargs)
 
-        self._artist = self._artistcls(
-            [block.get_artist()
-             for block in self._blocks],
+        self._artist = ax.add_collection(self._artistcls(
+            # TODO: does this work with 'interpolate'?
+            [proxy.get_artist() for proxy in self._proxies],
             # for column in self._columns
             # for block in column],
-            cmap=cmap,
             match_original=match_original,
             **kwargs
-        )
+        ))
         if self._cmap_data is not None:
             self._artist.set_array(
-                np.asarray([getattr(block, self._cmap_data)
-                            for block in self._blocks]))
+                np.asarray([getattr(proxy, self._cmap_data)
+                            for proxy in self._proxies]))
             # np.asarray([getattr(block, self._cmap_data)
             #             for column in self._columns
             #             for block in column]))
@@ -1081,7 +1114,7 @@ class BlockCollection(_ArtistProxy):
         # TODO: Draw the flows
         # ###
         # now the flows
-        # self._flow_collection = PatchCollection([flow.get_patch()
+        # self._flow_collection = PatchCollection([flow.get_artist()
         #                                          for flow in self._flows])
 
     # NOTE: this is in _AlluvialElement
@@ -1091,13 +1124,13 @@ class BlockCollection(_ArtistProxy):
     #     # for col_id in range(self._nbr_columns):
     #     #     for block in self._columns[col_id]:
 
-    def add_block(self, block):
+    def add_proxy(self, proxy):
         """Add a Block."""
-        self._blocks.append(block)
+        self._proxies.append(proxy)
 
 
-# TODO: maybe Tag is not even needed, but can just be BlockCollection
-class Tag(BlockCollection):
+# TODO: maybe Tag is not even needed, but can just be ProxyCollection
+class Tag(ProxyCollection):
     """
     A collection of `Blocks`
     """
@@ -1121,14 +1154,14 @@ class Tag(BlockCollection):
 
     def get_paths(self,):
         return [b.get_transform().transform_path(b.get_path())
-                for b in self._blocks]
+                for b in self._proxies]
 
     def add_block(self, block):
-        self._blocks.append(block)
+        self._proxies.append(block)
         # update the styling
 
 
-class SubDiagram(BlockCollection):
+class SubDiagram:
     """
     A collection of Blocks and Flows belonging to a diagram.
 
@@ -1137,7 +1170,7 @@ class SubDiagram(BlockCollection):
     def __init__(self, x, columns, flows, fractionflow,
                  label=None, yoff=0, hspace=1, hspace_combine='add',
                  label_margin=(0, 0), layout='centered', blockprops=None,
-                 **kwargs):
+                 flowprops=None, **kwargs):
         """
         Parameters
         ----------
@@ -1185,9 +1218,9 @@ class SubDiagram(BlockCollection):
             - 'top': Blocks are sorted according to their height with the
               biggest blocks at the top.
 
-        Other Parameters
+        Other Parameters (TODO)
         ----------------
-        **kwargs : Allowed are all `.Collection` properties
+        **kwargs : Allowed are all `.Collection` properties for Blocks and Flows
             Define the styling to apply to all elements in this subdiagram:
 
             %(Collection_kwdoc)s
@@ -1200,6 +1233,7 @@ class SubDiagram(BlockCollection):
             self._x = None
         self._yoff = yoff
         self._blockprops = blockprops or dict()
+        self._flowprops = flowprops or dict()
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1232,17 +1266,21 @@ class SubDiagram(BlockCollection):
                 #                      **kwargs) for size in column])
         self._nbr_columns = len(self._columns)
 
-        # TODO: determine what other arguments need to go to super
-        super().__init__(blocks=_blocks, label=label, **kwargs)
+        # TODO: below attributes need to be handled
+        self._redistribute_vertically = 4
+        self.y_min, self.y_max = None, None
+
+        # TODO: update blockprops with kwargs? at least handle label
+        self._blocks = ProxyCollection(_blocks, label=label,
+                                       **self._blockprops)
 
         # create the Flows is only based on *flows* and *extout*'s
-        self._flows = []
+        _flows = []
         # connect source and target:
         for m, flowM in enumerate(flows):
             # m is the source column, m+1 the target column
             s_col = self._columns[m]
             t_col = self._columns[m + 1]
-            _flows = []
             for i, row in enumerate(flowM):
                 # i is the index of the target block
                 for j, f in enumerate(row):
@@ -1251,7 +1289,9 @@ class SubDiagram(BlockCollection):
                     _flows.append(_Flow(flow=f, source=s_col[j],
                                         target=t_col[i],
                                         relative_flow=fractionflow))
-            self._flows.append(_flows)
+        # TODO: update flowprops with kwargs and label
+        self._flows = ProxyCollection(_flows, label=label,
+                                      **self._flowprops)
 
         self._hspace = hspace
 
@@ -1260,6 +1300,8 @@ class SubDiagram(BlockCollection):
         self.set_layout(layout)
 
         self._label_margin = label_margin
+
+        self._kwargs = kwargs
 
     def get_layout(self):
         """Get the layout of this diagram"""
@@ -1414,7 +1456,7 @@ class SubDiagram(BlockCollection):
                 positions = []
                 for in_flow in block.inflows:
                     if in_flow.source is not None:
-                        weights.append(in_flow.flow_width)
+                        weights.append(in_flow.flow)
                         positions.append(in_flow.source.get_yc())
                 if sum(weights) > 0.0:
                     _redistribute = True
@@ -1528,14 +1570,14 @@ class SubDiagram(BlockCollection):
             if direction in ['both', 'backwards']:
                 for flow in block.inflows:
                     if flow.source is not None:
-                        weights.append(flow.flow_width)
+                        weights.append(flow.flow)
                         sqdiff.append(abs(
                             block.get_yc() - flow.source.get_yc()
                         ))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
                     if flow.target is not None:
-                        weights.append(flow.flow_width)
+                        weights.append(flow.flow)
                         sqdiff.append(abs(
                             block.get_yc() - flow.target.get_yc()
                         ))
@@ -1564,14 +1606,14 @@ class SubDiagram(BlockCollection):
             if direction in ['both', 'backwards']:
                 for flow in block.inflows:
                     if flow.source is not None:
-                        weights.append(flow.flow_width)
+                        weights.append(flow.flow)
                         sqdiff.append(abs(
                             inv_mid_height[i] - flow.source.get_yc()
                         ))
             if direction in ['both', 'forwards']:
                 for flow in block.outflows:
                     if flow.target is not None:
-                        weights.append(flow.flow_width)
+                        weights.append(flow.flow)
                         sqdiff.append(
                             abs(inv_mid_height[i] - flow.target.get_yc())
                         )
@@ -1586,19 +1628,30 @@ class SubDiagram(BlockCollection):
             return False
 
     # TODO: automate the attribute separation or separate by construction
+    # this should go away
     @classmethod
     def separate_kwargs(cls, kwargs):
         """Separate all relevant kwargs for the init if a SubDiagram."""
         sdkwargs, other_kwargs = dict(), dict()
         sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
                    'hspace_combine', 'label_margin', 'cmap', 'norm',
-                   'cmap_array', 'blockprops']
+                   'cmap_array', 'blockprops', 'flowprops']
         for k, v in kwargs.items():
             if k in sd_args:
                 sdkwargs[k] = v
             else:
                 other_kwargs[k] = v
         return sdkwargs, other_kwargs
+
+    def create_artists(self, ax, **kwargs):
+        _kwargs = cbook.normalize_kwargs(kwargs, self._blocks._artistcls)
+        _kwargs.update(self._kwargs)
+        self._blocks.create_artist(ax=ax, **_kwargs)
+        for block in self._blocks:
+            block.handle_flows()
+        _kwargs = cbook.normalize_kwargs(kwargs, self._flows._artistcls)
+        _kwargs.update(self._kwargs)
+        self._flows.create_artist(ax=ax, **_kwargs)
 
 
 class Alluvial:
@@ -1612,8 +1665,8 @@ class Alluvial:
     """
     # @docstring.dedent_interpd
     def __init__(self, x=None, ax=None, y_pos='overwrite', tags=None,
-                 cluster_w_spacing=1, blockprops=None,
-                 flow_kwargs={},
+                 cluster_w_spacing=1, blockprops=None, flowprops=None,
+                 # flow_kwargs={},
                  label_kwargs={}, **kwargs):
         """
         Create a new Alluvial instance.
@@ -1682,16 +1735,19 @@ class Alluvial:
         blockprops : dict, optional
           The properties used to draw the blocks. *blockprops* accepts the
           following specific keyword arguments:
+        flowprops: dict, optional
+          The properties used to draw the flows. *flowprops* accepts the
+          following specific keyword arguments:
 
           - TODO
 
           Any further arguments provided are passed to
           `matplotlib.patches.PathPatch`.
 
-          Note that *blockprops* sets the properties of all sub-diagrams,
-          unless specific properties are provided when a sub-diagram is added
-          (see :meth:`add` for details), or :meth:`set_blockprops` is called
-          before adding further sub-diagrams.
+          Note that *blockprops* and *flowprops* set the properties of all
+          sub-diagrams, unless specific properties are provided when a
+          sub-diagram is added (see :meth:`add` for details), or
+          :meth:`set_blockprops` is called before adding further sub-diagrams.
 
           TODO: specify particular blockprops kw's
           `facecolor`, `edgecolor`, `alpha`, `linewidth`, ...
@@ -1805,7 +1861,8 @@ class Alluvial:
         self.y_pos = y_pos
         self.cluster_w_spacing = cluster_w_spacing
         self._blockprops = blockprops
-        self._flow_kwargs = flow_kwargs
+        self._flowprops = flowprops
+        # self._flow_kwargs = flow_kwargs
         self._label_kwargs = label_kwargs
 
         self._diagrams = []
@@ -2215,15 +2272,21 @@ class Alluvial:
 
         if x is not None:
             x = _to_valid_sequence(x, 'x')
+        elif self._x is not None:
+            x = self._x
         else:
             # use default if not specified
-            x = self._x or [i for i in range(len(columns))]
+            # x = self._x or [i for i in range(len(columns))]
+            x, columns = index_of(columns)
+
         # NOTE: add should anyways only accept kws for subdiagram
         # sdkw, otherkw = SubDiagram.separate_kwargs(_kwargs)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
+        _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows,
                              fractionflow=fractionflow, label=label,
-                             yoff=yoff, blockprops=_blockprops, **_kwargs)
+                             yoff=yoff, blockprops=_blockprops,
+                             flowprops=_flowprops, **_kwargs)
         # add the new subdiagram
         # get the x coordinates
         # TODO: cannot pass columns here. columns are a list of list[float]
@@ -2280,8 +2343,8 @@ class Alluvial:
             # create a PatchCollection out of all non-tagged blocks
             diag_zorder = 4
             diagram.determine_layout()
-            diagram.create_artist(zorder=diag_zorder, **self._kwargs)
-            self.ax.add_collection(diagram.get_artist())
+            diagram.create_artists(ax=self.ax, zorder=diag_zorder,
+                                   **self._kwargs)
         for tag in self._tags:
             # creat a PatchCollection for each tag
             # tag_zorder = 5
@@ -2390,12 +2453,12 @@ class Alluvial:
         ]
         _redistribute = False
         for cluster in self.clusters[x_pos]:
-            if sum([_flow.flow_width for _flow in cluster.inflows]) == 0.0:
+            if sum([_flow.flow for _flow in cluster.inflows]) == 0.0:
                 weights = []
                 positions = []
                 for out_flow in cluster.outflows:
                     if out_flow.target is not None:
-                        weights.append(out_flow.flow_width)
+                        weights.append(out_flow.flow)
                         positions.append(out_flow.target.mid_height)
                 if sum(weights) > 0.0:
                     _redistribute = True

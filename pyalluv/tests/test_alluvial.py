@@ -2,6 +2,8 @@ import pytest
 import numpy as np
 from pyalluv import Alluvial
 from matplotlib.testing.decorators import check_figures_equal
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
 
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
@@ -96,37 +98,63 @@ class TestAlluvialStyling:
     @check_figures_equal()
     def test_Block_styling(self, fig_test, fig_ref):
         # dev-test
-        # check if the styling parameter are passed along correctly to the
-        # creation of Rectangles.
-        from matplotlib.patches import Rectangle
-        from matplotlib.collections import PatchCollection
-        # set styling
-        style = dict(ec='green', fc='red', lw=2, alpha=0.2)
+        # Check individual styling of Rectangles.
+        style = dict(ec='green', lw=2)
         # create the two figures
         tesax = fig_test.subplots()
         refax = fig_ref.subplots()
         # draw a simple Recangle on refax
         pc = []
         pc.append(Rectangle((0, 0), width=1, height=3, **style))
-        pc.append(Rectangle((2, 0), width=1, height=2, **style))
+        pc.append(Rectangle((0, 4), width=1, height=1, **style))
+        pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
         refax.add_collection(PatchCollection(pc, match_original=True))
         # draw an alluvial with 1 diagram 1 col and a single block on tesax
-        Alluvial([0, 2], ax=tesax, ext=[[3], [2]], layout='bottom', **style)
+        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1)
+        diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
+                                **style)
+        # set the styling of a single block
+        block = diagram0.get_block((1, 0))  # column 1, block 0
+        block.set_property('facecolor', 'red')
+        alluvial.finish()
 
         # set common limits and axis styling
         refax.set_xlim(-1, 4)
         tesax.set_xlim(-1, 4)
-        refax.set_ylim(-1, 4)
-        tesax.set_ylim(-1, 4)
+        refax.set_ylim(-1, 6)
+        tesax.set_ylim(-1, 6)
 
-    # def test_Node(self):
-    #     node = pyalluv.Cluster(
-    #         height=10,
-    #         anchor=(0, 0),
-    #         widht=4,
-    #         x_anchor='left',
-    #         label='test node',
-    #         label_margin=(1, 2)
-    #     )
-    #     # make sure x_anchor works fine
-    #     assert node.x_pos == 0
+    @check_figures_equal()
+    def test_styling_hierarchy(self, fig_test, fig_ref):
+        # dev-test
+        # Test styling hierarchy: Block/Flow > SubDiagram > Alluvial
+        # set styling
+        style = dict(ec='green', lw=2)
+        # create the two figures
+        tesax = fig_test.subplots()
+        refax = fig_ref.subplots()
+        # draw a simple Recangle on refax
+        pc = []
+        yoff = 4
+        pc.append(Rectangle((0, yoff), width=1, height=1, fc='blue', **style))
+        pc.append(Rectangle((0, 0), width=1, height=3, fc='yellow', **style))
+        pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
+        refax.add_collection(PatchCollection(pc, match_original=True))
+        # set fc to blue for the entire alluvial plot
+        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc='blue', **style)
+        # set fc to yellow for first subdiagram
+        diagram0 = alluvial.add(flows=None, ext=[[3], [2]], layout='bottom',
+                                fc='yellow', **style)
+        # do not set fc for the second fc -> inherit from alluvial
+        alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom',
+                     **style)
+        # set the styling of a single block in an already styled subdiagram
+        block = diagram0.get_block((1, 0))  # column 1, block 0
+        block.set_property('facecolor', 'red')
+        alluvial.finish()
+
+        # set common limits and axis styling
+        refax.set_xlim(-1, 4)
+        tesax.set_xlim(-1, 4)
+        refax.set_ylim(-1, 6)
+        tesax.set_ylim(-1, 6)

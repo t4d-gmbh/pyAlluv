@@ -94,6 +94,9 @@ class _ArtistProxy:
         """Indicate whether a block belongs to a tag or not."""
         return True if len(self._tags) else False
 
+    def set_property(self, prop, value):
+        self._kwargs.update(cbook.normalize_kwargs({prop: value}))
+
     def set_styling(self, props):
         """Set the styling of the element."""
         self._original_kwargs = dict(props)
@@ -815,6 +818,9 @@ class _ProxyCollection(_ArtistProxy):
     def __iter__(self):
         return iter(self._proxies)
 
+    def __getitem__(self, key):
+        return self._proxies[key]
+
     def to_element_styling(self, styleprops: dict):
         """
         Convert the styling properties to lists matching self._blocks.
@@ -829,7 +835,6 @@ class _ProxyCollection(_ArtistProxy):
         return indiv_props
 
     def _pre_creation(self, ax=None, **non_artits_props):
-        print('\t', non_artits_props)
         for proxy in self._proxies:
             proxy.create_artist(ax=ax, **non_artits_props)
 
@@ -846,8 +851,6 @@ class _ProxyCollection(_ArtistProxy):
             match_original = True
         if match_original:
             kwargs = self.to_element_styling(kwargs)
-        print('mo:', match_original)
-        print('kws:', kwargs)
         # TODO: does this work with 'interpolate'?
         self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
@@ -1016,6 +1019,16 @@ class SubDiagram:
     def get_columns(self,):
         """Get all columns of this subdiagram"""
         return self._columns
+
+    def get_column(self, col_id):
+        return self._columns[col_id]
+
+    def get_block(self, identifier):
+        if isinstance(identifier, int):
+            return self._blocks[identifier]
+        else:
+            col_id, block_id = identifier
+            return self._columns[col_id][block_id]
 
     def set_column_layout(self, col_id, layout):
         """Set the layout for a single column"""
@@ -1302,17 +1315,15 @@ class SubDiagram:
         return sdkwargs, other_kwargs
 
     def create_artists(self, ax, **kwargs):
-        _kwargs = cbook.normalize_kwargs(kwargs, self._blocks._artistcls)
+        _kwargs = dict(kwargs)
         _kwargs.update(self._kwargs)
-        print('blocks', _kwargs)
-        self._blocks.create_artist(ax=ax, **_kwargs)
+        _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
+        self._blocks.create_artist(ax=ax, **_blockkws)
         self._blocks.add_artist(ax)
         for block in self._blocks:
             block.handle_flows()
-        _kwargs = cbook.normalize_kwargs(kwargs, self._flows._artistcls)
-        _kwargs.update(self._kwargs)
-        print('flows', _kwargs)
-        self._flows.create_artist(ax=ax, **_kwargs)
+        _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
+        self._flows.create_artist(ax=ax, **_flowkws)
         self._flows.add_artist(ax)
 
 
@@ -1470,6 +1481,9 @@ class Alluvial:
         """Get all sub-diagrams."""
         return self._diagrams
 
+    def get_diagram(self, diag_id):
+        return self._diagrams[diag_id]
+
     def _create_columns(self, cinit, flows, ext, extout, fractionflow):
         """
         Create the columns of an alluvial diagram.
@@ -1623,6 +1637,7 @@ class Alluvial:
         if flows is not None:
             nbr_cols = len(flows) + 1
         else:
+            flows = []
             nbr_cols = None
         # check ext and set initial column
         if ext is None:
@@ -1668,6 +1683,7 @@ class Alluvial:
         self._dlabels.append(label or f'diagram-{self._diagc}')
         self._extouts.append(extout)
         self._diagc += 1
+        return diagram
 
     def _add_diagram(self, diagram):
         """

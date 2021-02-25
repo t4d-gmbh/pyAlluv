@@ -129,24 +129,31 @@ class _ArtistProxy:
         """Initiate the artist and attach it to the axes."""
         raise NotImplementedError('Derived must override')
 
+    def _pre_creation(self, **non_artits_props):
+        """Method handling properties foreign to the attached artist class."""
+        pass
+
     def _applicable_properties(self, props):
         applicable = dict()
+        nonapp = dict()
         for k, v in props.items():
             func = getattr(self._artistcls, f"set_{k}", None)
             if not callable(func):
                 # do a warning?
                 _log.warning(f"{self._artistcls.__name__!r} object "
                              f"has no property {k!r}")
+                nonapp[k] = v
             else:
                 applicable[k] = v
-        return applicable
+        return applicable, nonapp
 
-    def create_artist(self, ax, **kwargs):
+    def create_artist(self, ax, **props):
         """Create the artist of this proxy."""
-        _kwargs = cbook.normalize_kwargs(kwargs, self._artistcls)
-        _kwargs.update(self._kwargs)
-        _kwargs = self._applicable_properties(_kwargs)
-        self._create_artist(ax, **_kwargs)
+        _props = cbook.normalize_kwargs(props, self._artistcls)
+        _props.update(self._kwargs)
+        _props, _nonprops = self._applicable_properties(_props)
+        self._pre_creation(**_nonprops)
+        self._create_artist(ax, **_props)
 
     def get_artist(self,):
         if self._artist is None:
@@ -379,8 +386,10 @@ class _Block(_ArtistProxy):
 
     def _create_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
-        self._artist = ax.add_patch(self._artistcls(self.get_xy(),
-                                    height=self._height, **kwargs))
+        self._artist = self._artistcls(self.get_xy(), height=self._height,
+                                       **kwargs)
+        if ax is not None:
+            self._artist = ax.add_patch(self._artist)
 
     def update_locations(self,):
         # TODO: this needs to be called AFTER self._artist has been attached to
@@ -560,13 +569,13 @@ class _Flow(_ArtistProxy):
     """
     _artistcls = patches.PathPatch
 
-    def __init__(self, flow, source=None, target=None, relative_flow=False,
+    def __init__(self, flow, source=None, target=None, fraction=False,
                  label=None, **kwargs):
         """
 
         Parameters
         -----------
-        relative_flow: bool
+        fraction : bool
           If ``True`` the fraction of the height of parameter `source`
           is taken, if the source is none, then the
           relative height form the target is taken.
@@ -614,19 +623,19 @@ class _Flow(_ArtistProxy):
         # else:
         #     self.flow = flow
 
-        self.relative_flow = relative_flow
+        self.fraction = fraction
         self.source = source
         self.target = target
         self._original_flow = flow
         # TODO: bad implementation
         if self.source is not None:
-            if self.relative_flow:
+            if self.fraction:
                 self.flow = flow * self.source.get_height()
             else:
                 self.flow = flow
         else:
             if self.target is not None:
-                if self.relative_flow:
+                if self.fraction:
                     self.flow = flow * self.target.get_height()
                 else:
                     self.flow = flow
@@ -751,17 +760,19 @@ class _Flow(_ArtistProxy):
         vertices = [self.anchor_out, dir_out_anchor, dir_in_anchor,
                     self.anchor_in, anchor_in_inner, top_in_inner, self.top_in,
                     dir_in_top, dir_out_top, self.top_out, top_out_inner,
-                    anchor_out_inner, self.anchor_out]
+                    anchor_out_inner]
+        # , self.anchor_out]
         codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4,
                  Path.LINETO, Path.LINETO, Path.LINETO, Path.CURVE4,
-                 Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO,
-                 Path.CLOSEPOLY]
+                 Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO]
+        # Path.CLOSEPOLY]
         # TODO: not sure about these values
         closed = True
         readonly = True
         interp_steps = 1
         _path = Path(vertices, codes, interp_steps, closed, readonly)
-        self._artist = ax.add_patch(self._artistcls(_path, **kwargs))
+        self._artist = self._artistcls(_path, **kwargs)
+        self._artist = ax.add_patch(self._artist)
         for prop, ref_artist in _ref_properties.items():
             self._set_from_artist(prop, ref_artist)
 
@@ -811,14 +822,10 @@ class _ProxyCollection(_ArtistProxy):
                 indiv_props[k] = v
         return indiv_props
 
-    def create_artist(self, ax, **kwargs):
-        _kwargs = dict(kwargs)
-        _kwargs.update(self._kwargs)
+    def _pre_creation(self, **non_artits_props):
+        print('\t', non_artits_props)
         for proxy in self._proxies:
-            # do not allow to pass kws to patch here.
-            # block.create_artist(**_kwargs)
-            proxy.create_artist(ax=ax, **_kwargs)
-        super().create_artist(ax=ax, **kwargs)
+            proxy.create_artist(ax=None, **non_artits_props)
 
     def _create_artist(self, ax, **kwargs):
         """
@@ -833,12 +840,11 @@ class _ProxyCollection(_ArtistProxy):
             match_original = True
         if match_original:
             kwargs = self.to_element_styling(kwargs)
-
+        print('mo:', match_original)
+        print('kws:', kwargs)
         self._artist = ax.add_collection(self._artistcls(
             # TODO: does this work with 'interpolate'?
             [proxy.get_artist() for proxy in self._proxies],
-            # for column in self._columns
-            # for block in column],
             match_original=match_original,
             **kwargs
         ))
@@ -956,7 +962,7 @@ class SubDiagram:
                 self._columns.append(column)
         else:
             for xi, col in zip(x, columns):
-                column = [_Block(size, xa=xi, **self._blockprops)
+                column = [_Block(size, xa=xi)
                           for size in col]
                 self._columns.append(column)
                 _blocks.extend(column)
@@ -979,12 +985,12 @@ class SubDiagram:
             t_col = self._columns[m + 1]
             for i, row in enumerate(flowM):
                 # i is the index of the target block
-                for j, f in enumerate(row):
+                for j, flow in enumerate(row):
                     # j is the index of the source block
                     # TODO: pass kwargs?
-                    _flows.append(_Flow(flow=f, source=s_col[j],
-                                        target=t_col[i],
-                                        relative_flow=fractionflow))
+                    if flow:
+                        _flows.append(_Flow(flow=flow, source=s_col[j],
+                                      target=t_col[i], fraction=fractionflow))
         # TODO: update flowprops with kwargs and label
         self._flows = _ProxyCollection(_flows, label=label, **self._flowprops)
         self._hspace = hspace
@@ -1031,15 +1037,15 @@ class SubDiagram:
             # TODO: handle the layout parameter
             self.distribute_blocks(col_id)
 
-    # TODO: This is probably not used, right?!
-    def set_paths(self, columns):
-        """Set the paths for untagged blocks of the subdiagram."""
-        self._paths = []
-        for col in columns:
-            self._paths.extend(
-                [p.get_transform().transform_path(p.get_path())
-                 for p in col
-                 if not p.is_tagged])
+    # # TODO: This is probably not used, right?!
+    # def set_paths(self, columns):
+    #     """Set the paths for untagged blocks of the subdiagram."""
+    #     self._paths = []
+    #     for col in columns:
+    #         self._paths.extend(
+    #             [p.get_transform().transform_path(p.get_path())
+    #              for p in col
+    #              if not p.is_tagged])
 
     def add_block(self, column: int, block):
         """Add a Block to a column."""
@@ -1289,11 +1295,13 @@ class SubDiagram:
     def create_artists(self, ax, **kwargs):
         _kwargs = cbook.normalize_kwargs(kwargs, self._blocks._artistcls)
         _kwargs.update(self._kwargs)
+        print('blocks', _kwargs)
         self._blocks.create_artist(ax=ax, **_kwargs)
         for block in self._blocks:
             block.handle_flows()
         _kwargs = cbook.normalize_kwargs(kwargs, self._flows._artistcls)
         _kwargs.update(self._kwargs)
+        print('flows', _kwargs)
         self._flows.create_artist(ax=ax, **_kwargs)
 
 

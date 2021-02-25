@@ -126,10 +126,10 @@ class _ArtistProxy:
         return True if self.is_tagged or self._kwargs else False
 
     def _create_artist(self, ax, **kwargs):
-        """Initiate the artist and attach it to the axes."""
+        """Initiate the artist."""
         raise NotImplementedError('Derived must override')
 
-    def _pre_creation(self, **non_artits_props):
+    def _pre_creation(self, ax=None, **non_artits_props):
         """Method handling properties foreign to the attached artist class."""
         pass
 
@@ -152,8 +152,12 @@ class _ArtistProxy:
         _props = cbook.normalize_kwargs(props, self._artistcls)
         _props.update(self._kwargs)
         _props, _nonprops = self._applicable_properties(_props)
-        self._pre_creation(**_nonprops)
+        self._pre_creation(ax, **_nonprops)
         self._create_artist(ax, **_props)
+
+    def add_artist(self, ax):
+        """Adding the artist to an axes."""
+        raise NotImplementedError('Derived must override')
 
     def get_artist(self,):
         if self._artist is None:
@@ -387,9 +391,10 @@ class _Block(_ArtistProxy):
     def _create_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
         self._artist = self._artistcls(self.get_xy(), height=self._height,
-                                       **kwargs)
-        if ax is not None:
-            self._artist = ax.add_patch(self._artist)
+                                       axes=ax, **kwargs)
+
+    def add_artist(self, ax):
+        self._artist = ax.add_patch(self._artist)
 
     def update_locations(self,):
         # TODO: this needs to be called AFTER self._artist has been attached to
@@ -706,9 +711,8 @@ class _Flow(_ArtistProxy):
         _dist = None
         if self.out_loc is not None:
             if self.in_loc is not None:
-                _dist = 2 / 3 * (
-                    self.target.get_inloc()['bottom'][0] - self.source.get_outloc()['bottom'][0]
-                )
+                _dist = 2 / 3 * (self.target.get_inloc()['bottom'][0] -
+                                 self.source.get_outloc()['bottom'][0])
             else:
                 _dist = 2 * _sw
                 # kwargs = _out_kwargs
@@ -771,10 +775,12 @@ class _Flow(_ArtistProxy):
         readonly = True
         interp_steps = 1
         _path = Path(vertices, codes, interp_steps, closed, readonly)
-        self._artist = self._artistcls(_path, **kwargs)
-        self._artist = ax.add_patch(self._artist)
+        self._artist = self._artistcls(_path, axes=ax, **kwargs)
         for prop, ref_artist in _ref_properties.items():
             self._set_from_artist(prop, ref_artist)
+
+    def add_artist(self, ax):
+        self._artist = ax.add_patch(self._artist)
 
 
 class _ProxyCollection(_ArtistProxy):
@@ -822,10 +828,10 @@ class _ProxyCollection(_ArtistProxy):
                 indiv_props[k] = v
         return indiv_props
 
-    def _pre_creation(self, **non_artits_props):
+    def _pre_creation(self, ax=None, **non_artits_props):
         print('\t', non_artits_props)
         for proxy in self._proxies:
-            proxy.create_artist(ax=None, **non_artits_props)
+            proxy.create_artist(ax=ax, **non_artits_props)
 
     def _create_artist(self, ax, **kwargs):
         """
@@ -842,16 +848,19 @@ class _ProxyCollection(_ArtistProxy):
             kwargs = self.to_element_styling(kwargs)
         print('mo:', match_original)
         print('kws:', kwargs)
-        self._artist = ax.add_collection(self._artistcls(
-            # TODO: does this work with 'interpolate'?
+        # TODO: does this work with 'interpolate'?
+        self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
             match_original=match_original,
             **kwargs
-        ))
+        )
         if self._cmap_data is not None:
             self._artist.set_array(
                 np.asarray([getattr(proxy, self._cmap_data)
                             for proxy in self._proxies]))
+
+    def add_artist(self, ax):
+        self._artist = ax.add_collection(self._artist)
 
     def add_proxy(self, proxy):
         """Add a Proxy."""
@@ -1297,12 +1306,14 @@ class SubDiagram:
         _kwargs.update(self._kwargs)
         print('blocks', _kwargs)
         self._blocks.create_artist(ax=ax, **_kwargs)
+        self._blocks.add_artist(ax)
         for block in self._blocks:
             block.handle_flows()
         _kwargs = cbook.normalize_kwargs(kwargs, self._flows._artistcls)
         _kwargs.update(self._kwargs)
         print('flows', _kwargs)
         self._flows.create_artist(ax=ax, **_kwargs)
+        self._flows.add_artist(ax)
 
 
 class Alluvial:

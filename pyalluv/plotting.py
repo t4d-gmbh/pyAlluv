@@ -178,10 +178,10 @@ class _Block(_ArtistProxy):
     """
     A Block in an Alluvial diagram.
 
-    Blocks in an Alluvial diagram get their vertical position assigned by a
-    layout algorithm and thus after creation. This is the rational to why
-    *_Block* inherits directly from `matplotlib.patches.Patch`, rather than
-    `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
+        Blocks in an Alluvial diagram get their vertical position assigned by a
+        layout algorithm and thus after creation. This is the rational to why
+        *_Block* inherits directly from `matplotlib.patches.Patch`, rather than
+        `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
     """
     _artistcls = Rectangle
 

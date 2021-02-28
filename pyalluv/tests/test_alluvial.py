@@ -94,6 +94,18 @@ class TestAlluvial:
                                   columns, layout=layout)
 
 
+class TestAlluvialLayout:
+    @pytest.mark.devtest
+    def test_vertical_ordering(self,):
+        # dev-test
+        # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
+        # and 'optimized'
+        raise NotImplementedError()
+
+    def test_axis_position(self, ):
+        pass
+
+
 class TestAlluvialStyling:
     @check_figures_equal()
     def test_Block_styling(self, fig_test, fig_ref):

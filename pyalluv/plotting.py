@@ -40,14 +40,13 @@ def _to_valid_sequence(data, attribute):
             for i, d in enumerate(_data):
                 try:
                     data.append(np.asfarray(d))
-                except ValueError:
+                except (TypeError, ValueError):
                     raise ValueError("{attr} can only contain array-like"
-                                     " objects, which is not the case"
-                                     " for entry {entry} in the provided"
-                                     " argument."
-                                     .format(attr=attribute, entry=i))
-    finally:
-        return data
+                                     " objects which is not the case for entry"
+                                     "{eindex} in the provided argument:\n"
+                                     "{entry}".format(attr=attribute, eindex=i,
+                                                      entry=d))
+    return data
 
 
 class _ArtistProxy:
@@ -1491,6 +1490,7 @@ class Alluvial:
         # create the columns
         columns = [cinit]
         if flows is not None:
+            print('flows', flows)
             for flow, e in zip(flows, ext[1:]):
                 _col = e
                 if len(flow):

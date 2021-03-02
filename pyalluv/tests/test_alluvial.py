@@ -87,16 +87,31 @@ class TestAlluvial:
                                   layout=layout, ref_columns=ref_columns)
 
 
+flows = [[[0, 3, 2], [4, 0, 0]], [[0, 2, 1, 1, 1], [4, 0, 0, 0]]]
+test_data = [
+    # (flows, ext, fractionflow, layout, layout, (resulting) columns
+    (flows, [4, 3, 2], False, ['bottom', 'bottom', 'bottom'],
+     [[4, 3, 2], [5, 4], [4, 2, 1, 1, 1]]),
+]
+test_ids = ['bottom-sorted']
+
+
+@pytest.mark.parametrize(
+    'flows, ext, fractf, layout, ref_columns', test_data, ids=test_ids
+)
 class TestAlluvialLayout:
     @pytest.mark.devtest
-    def test_vertical_ordering(self,):
+    def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
+        alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
+                            layout=layout, width=0.2)
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
         # and 'optimized'
         raise NotImplementedError()
 
-    def test_axis_position(self, ):
-        pass
+    @pytest.mark.devtest
+    def test_axis_position(self, flows, ext, fractf, layout, ref_columns):
+        raise NotImplementedError()
 
 
 class TestAlluvialStyling:

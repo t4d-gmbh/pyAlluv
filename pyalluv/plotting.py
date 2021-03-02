@@ -42,8 +42,8 @@ def _to_valid_sequence(data, attribute):
                     data.append(np.asfarray(d))
                 except (TypeError, ValueError):
                     raise ValueError("{attr} can only contain array-like"
-                                     " objects which is not the case for entry"
-                                     "{eindex} in the provided argument:\n"
+                                     " objects which is not the case at index"
+                                     "{eindex}:\n"
                                      "{entry}".format(attr=attribute, eindex=i,
                                                       entry=d))
     return data

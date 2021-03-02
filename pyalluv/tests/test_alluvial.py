@@ -8,27 +8,19 @@ from matplotlib.collections import PatchCollection
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
 test_data = [
-    (flows, [10, 10], True, [[10., 10.], [8., 7., 3.], [7., 7.]], 'top'),
-    (
-        flows, [[10, 10], [1, 1, 1], [2, 0.5]], True,
-        [[10., 10.], [9., 8., 4.], [10., 9.]], ['bottom', 'top', 'bottom']
-    ),
-    pytest.param(
-        flows, None, True, [[10., 10.], [8., 7., 3.], [7., 7.]], 'top',
-        marks=pytest.mark.xfail
-    ),
-    (
-        np.asarray(flows), np.array([10, 10]), True,
-        [[10., 10.], [8., 7., 3.], [7., 7.]], 'top'
-    ),
-    (
-        np.asarray(flows), np.asarray([[10, 10], [1, 1, 1], [2, 0.5]]), True,
-        [[10., 10.], [9., 8., 4.], [10., 9.]], 'top'
-    ),
-    pytest.param(
-        np.asarray(flows), None, True, [[10., 10.], [8., 7., 3.], [7., 7.]],
-        'bottom', marks=pytest.mark.xfail
-    )
+    # (flows, ext, fractionflow, layout, layout, (resulting) columns
+    (flows, [10, 10], True, 'top', [[10., 10.], [8., 7., 3.], [7., 7.]]),
+    (flows, [[10, 10], [1, 1, 1], [2, 0.5]], True,
+     ['bottom', 'top', 'bottom'], [[10., 10.], [9., 8., 4.], [10., 9.]]),
+    pytest.param(flows, None, True, 'top',
+                 [[10., 10.], [8., 7., 3.], [7., 7.]],
+                 marks=pytest.mark.xfail),
+    (np.asarray(flows), np.array([10, 10]), True, 'top',
+     [[10., 10.], [8., 7., 3.], [7., 7.]]),
+    (np.asarray(flows), np.asarray([[10, 10], [1, 1, 1], [2, 0.5]]), True,
+     'top', [[10., 10.], [9., 8., 4.], [10., 9.]]),
+    pytest.param(np.asarray(flows), None, True, 'bottom',
+                 [[10., 10.], [8., 7., 3.], [7., 7.]], marks=pytest.mark.xfail)
 ]
 test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'lists-fractionflows-extMissing', 'arrays-fractionflows',
@@ -37,10 +29,10 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
 
 
 @pytest.mark.parametrize(
-    'flows, ext, fractionflow, columns, layout', test_data, ids=test_ids
+    'flows, ext, fractionflow, layout, ref_columns', test_data, ids=test_ids
 )
 class TestAlluvial:
-    def _test_block_ordering(self, alluvial_collumns, ref_columns, layout):
+    def _test_block_ordering(self, alluvial_collumns, layout, ref_columns):
         # test whether the resulting block ordering in each column reflects
         # the chosen layout (only 'top' and 'bottom')
         if isinstance(layout, str):
@@ -58,16 +50,17 @@ class TestAlluvial:
             for i, c in enumerate(ref_columns)
         ]
 
-    def test_simple_alluvial(self, ext, flows, fractionflow, columns, layout):
+    def test_simple_alluvial(self, ext, flows, fractionflow, layout,
+                             ref_columns):
         # test creation of alluvial via __init__ directly.
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
                             layout=layout, width=1)
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  columns, layout=layout)
+                                  layout=layout, ref_columns=ref_columns)
 
     # @pytest.mark.skip(reason="later")
-    def test_alluvial_creation(self, ext, flows, fractionflow, columns,
-                               layout):
+    def test_alluvial_creation(self, ext, flows, fractionflow, layout,
+                               ref_columns):
         # test creation of alluvial diagram with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
@@ -75,10 +68,10 @@ class TestAlluvial:
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  columns, layout=layout)
+                                  layout=layout, ref_columns=ref_columns)
 
-    def test_multiple_subdiagrams(self, ext, flows, fractionflow, columns,
-                                  layout):
+    def test_multiple_subdiagrams(self, ext, flows, fractionflow, layout,
+                                  ref_columns):
         # dev-test
         # several sub diagrams with add and finish
         alluvial = Alluvial()
@@ -89,9 +82,9 @@ class TestAlluvial:
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  columns, layout=layout)
+                                  layout=layout, ref_columns=ref_columns)
         self._test_block_ordering(alluvial.get_diagrams()[1].get_columns(),
-                                  columns, layout=layout)
+                                  layout=layout, ref_columns=ref_columns)
 
 
 class TestAlluvialLayout:

@@ -9,16 +9,16 @@ from matplotlib.collections import PatchCollection
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
 test_data = [
     # (flows, ext, fractionflow, layout, layout, (resulting) columns
-    (flows, [10, 10], True, 'top', [[10., 10.], [8., 7., 3.], [7., 7.]]),
+    (flows, [10, 10], True, 'top', [[10., 10.], [8., 7., 3.][::-1], [7., 7.]]),
     (flows, [[10, 10], [1, 1, 1], [2, 0.5]], True,
-     ['bottom', 'top', 'bottom'], [[10., 10.], [9., 8., 4.], [10., 9.]]),
+     ['bottom', 'top', 'bottom'], [[10., 10.], [9., 8., 4.][::-1], [10., 9.]]),
     pytest.param(flows, None, True, 'top',
                  [[10., 10.], [8., 7., 3.], [7., 7.]],
                  marks=pytest.mark.xfail),
-    (np.asarray(flows), np.array([10, 10]), True, 'top',
+    (np.asarray(flows), np.array([10, 10]), True, 'bottom',
      [[10., 10.], [8., 7., 3.], [7., 7.]]),
     (np.asarray(flows), np.asarray([[10, 10], [1, 1, 1], [2, 0.5]]), True,
-     'top', [[10., 10.], [9., 8., 4.], [10., 9.]]),
+     'top', [[10., 10.], [9., 8., 4.][::-1], [10., 9.][::-1]]),
     pytest.param(np.asarray(flows), None, True, 'bottom',
                  [[10., 10.], [8., 7., 3.], [7., 7.]], marks=pytest.mark.xfail)
 ]
@@ -28,35 +28,25 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'arrays-fractionflows-extMissing']
 
 
+def _test_block_ordering(alluvial, layout, ref_columns):
+    # test whether the resulting block ordering in each column reflects
+    # the chosen layout (only 'top' and 'bottom')
+    columns = alluvial.get_diagrams()[0].get_columns()
+    block_heights = [[b.get_height() for b in c]
+                     for c in columns]
+    assert block_heights == ref_columns
+
+
 @pytest.mark.parametrize(
     'flows, ext, fractionflow, layout, ref_columns', test_data, ids=test_ids
 )
 class TestAlluvial:
-    def _test_block_ordering(self, alluvial_collumns, layout, ref_columns):
-        # test whether the resulting block ordering in each column reflects
-        # the chosen layout (only 'top' and 'bottom')
-        if isinstance(layout, str):
-            if layout == 'top':
-                _rev = False
-            elif layout == 'bottom':
-                _rev = True
-            rev = [_rev for _ in ref_columns]
-        else:
-            rev = [False if _l == 'top' else True for _l in layout]
-        block_heights = [[b.get_height() for b in c]
-                         for c in alluvial_collumns]
-        assert block_heights == [
-            sorted(c, reverse=rev[i])
-            for i, c in enumerate(ref_columns)
-        ]
-
     def test_simple_alluvial(self, ext, flows, fractionflow, layout,
                              ref_columns):
         # test creation of alluvial via __init__ directly.
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
                             layout=layout, width=1)
-        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  layout=layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
 
     # @pytest.mark.skip(reason="later")
     def test_alluvial_creation(self, ext, flows, fractionflow, layout,
@@ -67,8 +57,7 @@ class TestAlluvial:
                      layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  layout=layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
 
     def test_multiple_subdiagrams(self, ext, flows, fractionflow, layout,
                                   ref_columns):
@@ -81,33 +70,33 @@ class TestAlluvial:
                      layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        self._test_block_ordering(alluvial.get_diagrams()[0].get_columns(),
-                                  layout=layout, ref_columns=ref_columns)
-        self._test_block_ordering(alluvial.get_diagrams()[1].get_columns(),
-                                  layout=layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
 
 
-flows = [[[0, 3, 2], [4, 0, 0]], [[0, 2, 1, 1, 1], [4, 0, 0, 0]]]
+flows = [[[0, 3, 2], [4, 0, 0]], [[0, 4], [2, 0], [1, 0], [1, 0], [1, 0]]]
 test_data = [
     # (flows, ext, fractionflow, layout, layout, (resulting) columns
-    (flows, [4, 3, 2], False, ['bottom', 'bottom', 'bottom'],
-     [[4, 3, 2], [5, 4], [4, 2, 1, 1, 1]]),
+    (flows, [4, 3, 2], False, ['bottom', 'top', 'centered'],
+     [[4., 3., 2.], [4., 5.], [1., 1., 4., 2., 1.]]),
 ]
-test_ids = ['bottom-sorted']
+test_ids = ['block-sorting']
 
 
 @pytest.mark.parametrize(
     'flows, ext, fractf, layout, ref_columns', test_data, ids=test_ids
 )
 class TestAlluvialLayout:
+
     @pytest.mark.devtest
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
                             layout=layout, width=0.2)
+        print(len(alluvial.get_diagram(0).get_columns()))
+        _test_block_ordering(alluvial, layout=layout, ref_columns=ref_columns)
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
         # and 'optimized'
-        raise NotImplementedError()
 
     @pytest.mark.devtest
     def test_axis_position(self, flows, ext, fractf, layout, ref_columns):

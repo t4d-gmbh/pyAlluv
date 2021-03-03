@@ -49,6 +49,48 @@ def _to_valid_sequence(data, attribute):
     return data
 
 
+def _memship_to_column(membership, absentval=None):
+    if absentval in (None, np.nan):
+        _mask = ~np.isnan(membership)
+    else:
+        _mask = membership != absentval
+    nbr_blocks = int(np.amax(membership, where=_mask, initial=-1) + 1)
+    block_ids, counts = np.unique(membership[_mask], return_counts=True)
+    col = np.zeros(nbr_blocks)
+    print('block_ids', block_ids)
+    print('col', col)
+    for bid, count in zip(block_ids.astype(int), counts):
+        col[bid] = count
+    # TODO: this is not for production: make sure group ids start from 0
+    assert np.all(col != 0)
+    return nbr_blocks, col
+
+
+def _between_memships_flow(flow_dims, membership_last, membership_next,
+                           absentval=None):
+    ext = np.zeros(flow_dims[0])
+    print('m1', membership_last)
+    print('m2', membership_next)
+    flowmatrix = np.zeros(flow_dims, dtype=int)
+    print('fm', flowmatrix)
+    for m1, m2 in zip(membership_last.astype(int),
+                      membership_next.astype(int)):
+        print(m1, m2)
+        if m1 == absentval:  # node was absent in last
+            if m2 != absentval:  # node is present in next
+                ext[m2] += 1
+            else:  # node also absent in next:
+                pass
+        else:
+            if m2 != absentval:  # node is present in both
+                flowmatrix[m2, m1] += 1
+            else:  # node is absent in next
+                # TODO: handle outflows?
+                pass
+        print('fm', flowmatrix)
+    return flowmatrix, ext
+
+
 class _ArtistProxy:
     """
     Proxy class for `Artist` subclasses used to draw the various element in an
@@ -399,8 +441,6 @@ class _Block(_ArtistProxy):
         self._artist = ax.add_patch(self._artist)
 
     def update_locations(self,):
-        # TODO: this needs to be called AFTER self._artist has been attached to
-        # an axis
         x0, y0, x1, y1 = self._artist._convert_units()
 
     def _set_loc_out_flows(self,):
@@ -576,16 +616,11 @@ class _Flow(_ArtistProxy):
     """
     _artistcls = patches.PathPatch
 
-    def __init__(self, flow, source=None, target=None, fraction=False,
-                 label=None, **kwargs):
+    def __init__(self, flow, source=None, target=None, label=None, **kwargs):
         """
 
         Parameters
         -----------
-        fraction : bool
-          If ``True`` the fraction of the height of parameter `source`
-          is taken, if the source is none, then the
-          relative height form the target is taken.
         source: :class:`pyalluv.clusters.Cluster` (default=None)
           Cluster from which the flow originates.
         target: :class:`pyalluv.clusters.Cluster` (default=None)
@@ -630,25 +665,11 @@ class _Flow(_ArtistProxy):
         # else:
         #     self.flow = flow
 
-        self.fraction = fraction
         self.source = source
         self.target = target
         self._original_flow = flow
-        # TODO: bad implementation
-        if self.source is not None:
-            if self.fraction:
-                self.flow = flow * self.source.get_height()
-            else:
-                self.flow = flow
-        else:
-            if self.target is not None:
-                if self.fraction:
-                    self.flow = flow * self.target.get_height()
-                else:
-                    self.flow = flow
-            else:
-                self.flow = flow
-
+        self.flow = flow
+        # attach the flow to the source and target blocks
         if self.source is not None:
             self.source.add_outflow(self)
         if self.target is not None:
@@ -888,10 +909,9 @@ class SubDiagram:
     A collection of Blocks and Flows belonging to a diagram.
 
     """
-    def __init__(self, x, columns, flows, fractionflow,
-                 label=None, yoff=0, hspace=1, hspace_combine='add',
-                 label_margin=(0, 0), layout='centered', blockprops=None,
-                 flowprops=None, **kwargs):
+    def __init__(self, x, columns, flows, label=None, yoff=0, hspace=1,
+                 hspace_combine='add', label_margin=(0, 0), layout='centered',
+                 blockprops=None, flowprops=None, **kwargs):
         """
         Parameters
         ----------
@@ -990,10 +1010,12 @@ class SubDiagram:
         # create the Flows is only based on *flows* and *extout*'s
         _flows = []
         # connect source and target:
+        print(flows)
         for m, flowM in enumerate(flows):
             # m is the source column, m+1 the target column
             s_col = self._columns[m]
             t_col = self._columns[m + 1]
+            print(flowM)
             for i, row in enumerate(flowM):
                 # i is the index of the target block
                 for j, flow in enumerate(row):
@@ -1001,7 +1023,7 @@ class SubDiagram:
                     # TODO: pass kwargs?
                     if flow:
                         _flows.append(_Flow(flow=flow, source=s_col[j],
-                                      target=t_col[i], fraction=fractionflow))
+                                            target=t_col[i]))
         # TODO: update flowprops with kwargs and label
         self._flows = _ProxyCollection(_flows, label=label, **self._flowprops)
         self._hspace = hspace
@@ -1231,6 +1253,7 @@ class SubDiagram:
         _column = self._columns[column]
         for block in _column:
             block.set_y(displace)
+            print(displace, block.get_height(), hspace)
             displace += block.get_height() + hspace
         # now offset to center
         low = _column[0].get_y()  # this is just self._yoff
@@ -1483,26 +1506,118 @@ class Alluvial:
     def get_diagram(self, diag_id):
         return self._diagrams[diag_id]
 
-    def _create_columns(self, cinit, flows, ext, extout, fractionflow):
+    def _to_cols_and_flows(self, cinit, flows, ext, extout, fractionflow):
         """
-        Create the columns of an alluvial diagram.
+        Create the columns of an alluvial diagram and convert fractional flows
+        to absolute quantities.
         """
         # create the columns
         columns = [cinit]
         if flows is not None:
-            print('flows', flows)
-            for flow, e in zip(flows, ext[1:]):
-                _col = e
+            flows = np.copy(flows)
+            for i in range(len(flows)):
+                flow = flows[i]
+                e = ext[i + 1]
                 if len(flow):
                     if fractionflow:
                         _flow = flow.dot(columns[-1])
+                        # create the absolute flow matrix
+                        flows[i] = flow * columns[-1]
                     else:
                         _flow = flow.sum(1)
                     _col = _flow + e
+                else:
+                    _col = e
                 columns.append(_col)
         if extout is not None:
             pass  # TODO: check extout format
-        return columns
+        return columns, flows
+
+    def _from_membership(self, memberships, absentval=None, x=None, label=None,
+                         yoff=None, **kwargs):
+        memberships = _to_valid_sequence(memberships, 'memberships')
+        for i, membership in enumerate(memberships):
+            if np.unique(membership).size != np.max(membership) + 1:
+                raise ValueError("The provided membership lists must associate"
+                                 " nodes to groups that are continuously"
+                                 " numbered starting from 0. This is not the"
+                                 f" case at index {i}:\n{membership}")
+        # TODO: make it work with dataframe
+        # if not isinstance(memberships, (list, tuple)):
+        #     try:
+        #         memberships.index.values
+        #     except AttributeError:
+        #         memberships.shape
+        #         # return np.arange(y.shape[0], dtype=float), y
+        #         pass
+        columns, flows = [], []
+        # process the first membership list
+        memship_last = memberships[0]
+        nbr_blocks_last, col = _memship_to_column(memship_last, absentval)
+        columns, flows = [col], []
+        for i in range(1, len(memberships)):
+            # create the flow matrix
+            nbr_blocks, col = _memship_to_column(memberships[i])
+            flow_dims = (nbr_blocks, nbr_blocks_last)
+            print('flow_dims', flow_dims)
+            flow, ext = _between_memships_flow(flow_dims, memship_last,
+                                               memberships[i])
+            print('flow', flow)
+            flows.append(flow)
+            # add ext to the column and append to the columns
+            columns.append(col + ext)
+            memship_last = memberships[i]
+            nbr_blocks_last = nbr_blocks
+        if x is not None:
+            x = _to_valid_sequence(x, 'x')
+        elif self._x is not None:
+            x = self._x
+        else:
+            x, columns = index_of(columns)
+        x, columns = self._determine_x(x, columns)
+        print('columns', columns)
+        return self._add(columns, flows, x=x, label=label, yoff=yoff, **kwargs)
+
+    @classmethod
+    def from_memberships(cls, memberships, absentval=None, x=None, label=None,
+                         yoff=0.0, **kwargs):
+        """
+        Add an new subdiagram from a sequence of membership lists.
+
+        Parameters
+        ----------
+        memberships : sequence of array-like objects or dataframe
+            The length of the sequence determines the number of columns in the
+            diagram. Each element in the sequence must be an array-like object
+            representing a membership list. For further details see below.
+        absentval : int or np.nan (default=None)
+            Notes for which  this value is encountered in the membership lists
+            are considered to not be present.
+
+        Note that all elements in *memberships* must be membership lists of
+        identical length. Further the group identifiers present in a membership
+        list must be derived from an enumeration of the groups.
+
+        """
+        alluvial = Alluvial(x=x)
+        alluvial._from_membership(memberships, absentval, label=label,
+                                  yoff=yoff, **kwargs)
+        return alluvial
+
+    def _add(self, columns, flows, x, label, yoff, **kwargs):
+        _kwargs = dict(kwargs)
+        _blockprops = _kwargs.pop('blockprops', self._blockprops)
+        _flowprops = _kwargs.pop('flowprops', self._flowprops)
+        diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
+                             blockprops=_blockprops, flowprops=_flowprops,
+                             yoff=yoff, **_kwargs)
+        self._add_diagram(diagram)
+        self._dlabels.append(label or f'diagram-{self._diagc}')
+        self._diagc += 1
+        return diagram
+
+    def add_from_memberships(self,):
+        raise NotImplementedError('Missing implementation')
 
     def add(self, flows, ext=None, extout=None, x=None, label=None, yoff=0,
             fractionflow=False, tags=None, **kwargs):
@@ -1631,7 +1746,6 @@ class Alluvial:
           column *i* and :math:`\textbf{e}_{i+1}` the external inflow vector of
           shape (P) given by *e[i+1]*.
         """
-        _kwargs = dict(kwargs)
         # TODO: make sure empty flows are accepted
         flows = _to_valid_sequence(flows, 'flows')
         if flows is not None:
@@ -1666,24 +1780,23 @@ class Alluvial:
                 if nbr_cols is None:
                     nbr_cols = 1
                 ext = np.zeros(nbr_cols)  # Note: we overwrite ext in this case
-        columns = self._create_columns(cinit, flows, ext, extout, fractionflow)
+        columns, flows = self._to_cols_and_flows(cinit, flows, ext, extout,
+                                                 fractionflow)
 
+        x, columns = self._determine_x(x, columns)
+        # TODO: extout are not processed so far
+        self._extouts.append(extout)
+        return self._add(columns=columns, flows=flows, x=x, label=label,
+                         yoff=yoff, tags=tags, **kwargs)
+
+    def _determine_x(self, x, columns):
         if x is not None:
             x = _to_valid_sequence(x, 'x')
         elif self._x is not None:
             x = self._x
         else:
             x, columns = index_of(columns)
-        _blockprops = _kwargs.pop('blockprops', self._blockprops)
-        _flowprops = _kwargs.pop('flowprops', self._flowprops)
-        diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
-                             fractionflow=fractionflow, blockprops=_blockprops,
-                             flowprops=_flowprops, yoff=yoff, **_kwargs)
-        self._add_diagram(diagram)
-        self._dlabels.append(label or f'diagram-{self._diagc}')
-        self._extouts.append(extout)
-        self._diagc += 1
-        return diagram
+        return x, columns
 
     def _add_diagram(self, diagram):
         """

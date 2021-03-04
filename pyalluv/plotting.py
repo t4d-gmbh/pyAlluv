@@ -22,11 +22,22 @@ __author__ = 'Jonas I. Liechti'
 
 
 # TODO: check if cbook has something for this
-def _to_valid_sequence(data, attribute):
+def _to_valid_arrays(data, attribute, dtype=np.float64):
     if data is None:
         return None
+    # if dim == 1:
+    #     _atleast = np.atleast_1d
+    # elif dim == 2:
+    #     _atleast = np.atleast_2d
+    # else:
+    #     raise ValueError(f'*dim* can only be 1 or 2, {dim} is not allowed')
+
+    if hasattr(data, 'index') and hasattr(data, 'values'):
+        return data.values
+    #
+    # return _atleast(*data)
     try:
-        data = np.asfarray(data)
+        data = np.asarray(data, dtype=dtype)
     except ValueError:
         try:
             _data = iter(data)
@@ -39,7 +50,7 @@ def _to_valid_sequence(data, attribute):
             data = []
             for i, d in enumerate(_data):
                 try:
-                    data.append(np.asfarray(d))
+                    data.append(np.asarray(d, dtype=dtype))
                 except (TypeError, ValueError):
                     raise ValueError("{attr} can only contain array-like"
                                      " objects which is not the case at index"
@@ -57,8 +68,6 @@ def _memship_to_column(membership, absentval=None):
     nbr_blocks = int(np.amax(membership, where=_mask, initial=-1) + 1)
     block_ids, counts = np.unique(membership[_mask], return_counts=True)
     col = np.zeros(nbr_blocks)
-    print('block_ids', block_ids)
-    print('col', col)
     for bid, count in zip(block_ids.astype(int), counts):
         col[bid] = count
     # TODO: this is not for production: make sure group ids start from 0
@@ -69,13 +78,9 @@ def _memship_to_column(membership, absentval=None):
 def _between_memships_flow(flow_dims, membership_last, membership_next,
                            absentval=None):
     ext = np.zeros(flow_dims[0])
-    print('m1', membership_last)
-    print('m2', membership_next)
     flowmatrix = np.zeros(flow_dims, dtype=int)
-    print('fm', flowmatrix)
     for m1, m2 in zip(membership_last.astype(int),
                       membership_next.astype(int)):
-        print(m1, m2)
         if m1 == absentval:  # node was absent in last
             if m2 != absentval:  # node is present in next
                 ext[m2] += 1
@@ -87,7 +92,6 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
             else:  # node is absent in next
                 # TODO: handle outflows?
                 pass
-        print('fm', flowmatrix)
     return flowmatrix, ext
 
 
@@ -969,7 +973,7 @@ class SubDiagram:
         Note that *x* and *columns* must be sequences of the same length.
         """
         if x is not None:
-            self._x = _to_valid_sequence(x, 'x')
+            self._x = _to_valid_arrays(x, 'x')
         else:
             self._x = None
         self._yoff = yoff
@@ -1010,12 +1014,10 @@ class SubDiagram:
         # create the Flows is only based on *flows* and *extout*'s
         _flows = []
         # connect source and target:
-        print(flows)
         for m, flowM in enumerate(flows):
             # m is the source column, m+1 the target column
             s_col = self._columns[m]
             t_col = self._columns[m + 1]
-            print(flowM)
             for i, row in enumerate(flowM):
                 # i is the index of the target block
                 for j, flow in enumerate(row):
@@ -1253,7 +1255,6 @@ class SubDiagram:
         _column = self._columns[column]
         for block in _column:
             block.set_y(displace)
-            print(displace, block.get_height(), hspace)
             displace += block.get_height() + hspace
         # now offset to center
         low = _column[0].get_y()  # this is just self._yoff
@@ -1439,7 +1440,7 @@ class Alluvial:
 
         """
         if x is not None:
-            self._x = _to_valid_sequence(x, 'x')
+            self._x = _to_valid_arrays(x, 'x')
         else:
             self._x = None
         # create axes if not provided
@@ -1497,7 +1498,7 @@ class Alluvial:
         if x is None:
             self._x = None
         else:
-            self._x = _to_valid_sequence(x, 'x')
+            self._x = _to_valid_arrays(x, 'x')
 
     def get_diagrams(self):
         """Get all sub-diagrams."""
@@ -1535,7 +1536,7 @@ class Alluvial:
 
     def _from_membership(self, memberships, absentval=None, x=None, label=None,
                          yoff=None, **kwargs):
-        memberships = _to_valid_sequence(memberships, 'memberships')
+        memberships = _to_valid_arrays(memberships, 'memberships', np.int)
         for i, membership in enumerate(memberships):
             if np.unique(membership).size != np.max(membership) + 1:
                 raise ValueError("The provided membership lists must associate"
@@ -1559,23 +1560,20 @@ class Alluvial:
             # create the flow matrix
             nbr_blocks, col = _memship_to_column(memberships[i])
             flow_dims = (nbr_blocks, nbr_blocks_last)
-            print('flow_dims', flow_dims)
             flow, ext = _between_memships_flow(flow_dims, memship_last,
                                                memberships[i])
-            print('flow', flow)
             flows.append(flow)
             # add ext to the column and append to the columns
             columns.append(col + ext)
             memship_last = memberships[i]
             nbr_blocks_last = nbr_blocks
         if x is not None:
-            x = _to_valid_sequence(x, 'x')
+            x = _to_valid_arrays(x, 'x')
         elif self._x is not None:
             x = self._x
         else:
             x, columns = index_of(columns)
         x, columns = self._determine_x(x, columns)
-        print('columns', columns)
         return self._add(columns, flows, x=x, label=label, yoff=yoff, **kwargs)
 
     @classmethod
@@ -1747,9 +1745,9 @@ class Alluvial:
           shape (P) given by *e[i+1]*.
         """
         # TODO: make sure empty flows are accepted
-        flows = _to_valid_sequence(flows, 'flows')
         if flows is not None:
             nbr_cols = len(flows) + 1
+            flows = _to_valid_arrays(flows, attribute='flows')
         else:
             flows = []
             nbr_cols = None
@@ -1769,7 +1767,7 @@ class Alluvial:
             # Note: extout from the first column are ignored
             cinit = flows[0].sum(0)
         else:
-            ext = _to_valid_sequence(ext, 'ext')
+            ext = _to_valid_arrays(ext, 'ext')
             if isinstance(ext[0], np.ndarray):
                 cinit = ext[0]
                 if nbr_cols is None:  # if no flows were provided
@@ -1791,7 +1789,7 @@ class Alluvial:
 
     def _determine_x(self, x, columns):
         if x is not None:
-            x = _to_valid_sequence(x, 'x')
+            x = _to_valid_arrays(x, 'x')
         elif self._x is not None:
             x = self._x
         else:

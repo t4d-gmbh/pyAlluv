@@ -4,6 +4,16 @@ from pyalluv import Alluvial
 from matplotlib.testing.decorators import check_figures_equal
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
+import pandas as pd
+
+
+def _test_block_ordering(alluvial, ref_columns):
+    # test whether the resulting block ordering in each column reflects
+    # the chosen layout (only 'top' and 'bottom')
+    columns = alluvial.get_diagrams()[0].get_columns()
+    block_heights = [[b.get_height() for b in c]
+                     for c in columns]
+    assert block_heights == ref_columns
 
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
@@ -15,11 +25,11 @@ test_data = [
     pytest.param(flows, None, True, 'top',
                  [[10., 10.], [8., 7., 3.], [7., 7.]],
                  marks=pytest.mark.xfail),
-    (np.asarray(flows), np.array([10, 10]), True, 'bottom',
+    (np.atleast_2d(*flows), np.array([10, 10]), True, 'bottom',
      [[10., 10.], [8., 7., 3.], [7., 7.]]),
-    (np.asarray(flows), np.asarray([[10, 10], [1, 1, 1], [2, 0.5]]), True,
+    (np.atleast_2d(*flows), np.atleast_1d([10, 10], [1, 1, 1], [2, 0.5]), True,
      'top', [[10., 10.], [9., 8., 4.][::-1], [10., 9.][::-1]]),
-    pytest.param(np.asarray(flows), None, True, 'bottom',
+    pytest.param(np.atleast_2d(flows), None, True, 'bottom',
                  [[10., 10.], [8., 7., 3.], [7., 7.]], marks=pytest.mark.xfail)
 ]
 test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
@@ -28,25 +38,16 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'arrays-fractionflows-extMissing']
 
 
-def _test_block_ordering(alluvial, layout, ref_columns):
-    # test whether the resulting block ordering in each column reflects
-    # the chosen layout (only 'top' and 'bottom')
-    columns = alluvial.get_diagrams()[0].get_columns()
-    block_heights = [[b.get_height() for b in c]
-                     for c in columns]
-    assert block_heights == ref_columns
-
-
 @pytest.mark.parametrize(
     'flows, ext, fractionflow, layout, ref_columns', test_data, ids=test_ids
 )
-class TestAlluvial:
+class TestAlluvialFlows:
     def test_simple_alluvial(self, ext, flows, fractionflow, layout,
                              ref_columns):
         # test creation of alluvial via __init__ directly.
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
                             layout=layout, width=1)
-        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns=ref_columns)
 
     # @pytest.mark.skip(reason="later")
     def test_alluvial_creation(self, ext, flows, fractionflow, layout,
@@ -57,7 +58,7 @@ class TestAlluvial:
                      layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns=ref_columns)
 
     def test_multiple_subdiagrams(self, ext, flows, fractionflow, layout,
                                   ref_columns):
@@ -70,8 +71,32 @@ class TestAlluvial:
                      layout=layout, width=1)
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
-        _test_block_ordering(alluvial, layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns=ref_columns)
+
+
+memberships = [[0, 1, 1, 2], [3, 0, 1, 2], [1, 1, 1, 0]]
+ref_columns = [[1, 2, 1], [1, 1, 1, 1], [3, 1]]
+ref_flows = [[[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 1]],
+             [[1, 1, 1, 0], [0, 0, 0, 1]]]
+test_data = [
+    # (memberships, ref_columns, ref_flows)
+    (memberships, ref_columns, ref_flows),
+    # passing pandas df
+    (pd.DataFrame(memberships, index=[1, 2, 3]),
+     ref_columns, ref_flows),
+]
+test_ids = ['memberships-conversion', 'memberships-df-conversion']
+
+
+@pytest.mark.parametrize(
+    'memberships, ref_columns, ref_flows', test_data, ids=test_ids
+)
+class TestAlluvialMemberships:
+    def test_memberships_conversion(self, memberships, ref_columns, ref_flows):
+        alluvial = Alluvial.from_memberships(memberships, width=0.3, layout='centered')
+        alluvial.finish()
+        _test_block_ordering(alluvial, ref_columns)
 
 
 flows = [[[0, 3, 2], [4, 0, 0]], [[0, 4], [2, 0], [1, 0], [1, 0], [1, 0]]]
@@ -93,7 +118,11 @@ class TestAlluvialLayout:
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
                             layout=layout, width=0.2)
         print(len(alluvial.get_diagram(0).get_columns()))
-        _test_block_ordering(alluvial, layout=layout, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        # from matplotlib import pyplot as plt
+        alluvial.ax.set_xlim(-1, 4)
+        alluvial.ax.set_ylim(-11, 11)
+        # plt.show()
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
         # and 'optimized'

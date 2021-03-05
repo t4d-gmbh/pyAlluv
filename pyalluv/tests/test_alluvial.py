@@ -131,6 +131,26 @@ class TestAlluvialLayout:
     def test_axis_position(self, flows, ext, fractf, layout, ref_columns):
         raise NotImplementedError()
 
+    @pytest.mark.devtest
+    def test_yoff(self, flows, ext, fractf, layout, ref_columns):
+        raise NotImplementedError()
+        from pyalluv import Alluvial
+        from matplotlib import pyplot as plt
+        a = Alluvial.from_memberships(
+            [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
+            width=0.2, hspace_combine='divide'
+        )
+        a.add_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
+                          layout='top', width=0.2, hspace_combine='divide',
+                          yoff=-2)
+        a.add_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
+                          layout='bottom', width=0.2, hspace_combine='divide',
+                          yoff=2)
+        a.finish()
+        a.ax.set_xlim(-1, 4)
+        a.ax.set_ylim(-4, 8)
+        plt.show()
+
 
 class TestAlluvialStyling:
     @check_figures_equal()

@@ -949,7 +949,7 @@ class SubDiagram:
                 This should be in points.
         layout : sequence or str, default: 'centered'
             The type of layout used to display the diagram.
-            Allowed layout modes are: {'centered', 'bottom', 'top'}.
+            Allowed layouts are: {'centered', 'bottom', 'top', 'optimized'}.
 
             If as sequence is provided, the M elements must specify the layout
             for each of the M columns in the diagram.
@@ -962,6 +962,9 @@ class SubDiagram:
               biggest blocks at the bottom.
             - 'top': Blocks are sorted according to their height with the
               biggest blocks at the top.
+            - 'optimized': Starting from a centered layout the order of bocks
+              in a column is iteratively changed to decrease the vertical
+              displacement of all flows attached to the column.
 
         Other Parameters (TODO)
         ----------------
@@ -1056,7 +1059,8 @@ class SubDiagram:
     def set_column_layout(self, col_id, layout):
         """Set the layout for a single column"""
         # TODO: uncomment once in mpl
-        # _api.check_in_list(['centered', 'top', 'bottom'], layout=layout)
+        # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
+        #                    layout=layout)
         self._layout[col_id] = layout
 
     def get_column_layout(self, col_id):
@@ -1067,14 +1071,15 @@ class SubDiagram:
         """Set the layout for this diagram"""
         if isinstance(layout, str):
             # TODO: uncomment once in mpl
-            # _api.check_in_list(['centered', 'top', 'bottom'], layout=layout)
+            # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
+            #                    layout=layout)
             self._layout = [layout for _ in range(self._nbr_columns)]
         else:
             self._layout = []
             for _layout in layout:
                 # TODO: uncomment once in mpl
-                # _api.check_in_list(['centered', 'top', 'bottom'],
-                #                     layout=_layout)
+                # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
+                #                    layout=layout)
                 self._layout.append(_layout)
 
     def determine_layout(self, ):
@@ -1143,7 +1148,7 @@ class SubDiagram:
                 self._reorder_column(col_id, ordering)
                 self._update_ycoords(col_id, col_hspace, layout)
             # in both cases no further sorting is needed
-            if layout == 'centered':
+            else:
                 # sort so to put biggest height in the middle
                 ordering = ordering[::-2][::-1] + \
                     ordering[nbr_blocks % 2::2][::-1]
@@ -1152,11 +1157,13 @@ class SubDiagram:
                 self._update_ycoords(col_id, col_hspace, layout)
                 # ###
                 # TODO: both methods below need to be checked
-                # # now sort again considering the flows.
-                # self._decrease_flow_distances(col_id)
-                # # perform pairwise swapping for backwards flows
-                # self._pairwise_swapping(col_id)
-
+                if layout == 'optimized':
+                    # # now sort again considering the flows.
+                    # self._decrease_flow_distances(col_id)
+                    # # perform pairwise swapping for backwards flows
+                    # self._pairwise_swapping(col_id)
+                    raise NotImplementedError("The optimized layout is not yet"
+                                              " implemented")
                 # TODO: bad implementation, avoid duplicated get_y call
                 _min_y = min(self._columns[col_id],
                              key=lambda x: x.get_y()).get_y() - 2 * col_hspace
@@ -1165,14 +1172,10 @@ class SubDiagram:
                 _max_y = _max_y_cluster.get_y() + \
                     _max_y_cluster.get_height() + 2 * col_hspace
                 # TODO: not doing anything with this so far...
-                self.y_min = min(
-                    self.y_min,
-                    _min_y
-                ) if self.y_min is not None else _min_y
-                self.y_max = max(
-                    self.y_max,
-                    _max_y
-                ) if self.y_max is not None else _max_y
+                self.y_min = min(self.y_min,
+                                 _min_y) if self.y_min is not None else _min_y
+                self.y_max = max(self.y_max,
+                                 _max_y) if self.y_max is not None else _max_y
 
     def _decrease_flow_distances(self, col_id):
         _column = self._columns[col_id]
@@ -1260,7 +1263,7 @@ class SubDiagram:
         low = _column[0].get_y()  # this is just self._yoff
         # this is just `displace`:
         high = _column[-1].get_y() + _column[-1].get_height()
-        if layout == 'centered':
+        if layout == 'centered' or layout == 'optimized':
             cent_offset = low + 0.5 * (high - low)
             for block in _column:
                 block.set_y(block.get_y() - cent_offset)

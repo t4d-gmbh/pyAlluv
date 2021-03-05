@@ -117,12 +117,7 @@ class TestAlluvialLayout:
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
                             layout=layout, width=0.2)
-        print(len(alluvial.get_diagram(0).get_columns()))
         _test_block_ordering(alluvial, ref_columns=ref_columns)
-        # from matplotlib import pyplot as plt
-        alluvial.ax.set_xlim(-1, 4)
-        alluvial.ax.set_ylim(-11, 11)
-        # plt.show()
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
         # and 'optimized'
@@ -157,7 +152,7 @@ class TestAlluvialStyling:
     def test_Block_styling(self, fig_test, fig_ref):
         # dev-test
         # Check individual styling of Rectangles.
-        style = dict(ec='green', lw=2)
+        style = dict(ec='green', lw=2, clip_on=True)
         # create the two figures
         tesax = fig_test.subplots()
         refax = fig_ref.subplots()
@@ -166,7 +161,7 @@ class TestAlluvialStyling:
         pc.append(Rectangle((0, 0), width=1, height=3, **style))
         pc.append(Rectangle((0, 4), width=1, height=1, **style))
         pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
-        refax.add_collection(PatchCollection(pc, match_original=True))
+        refax.add_collection(PatchCollection(pc, match_original=True, zorder=4))
         # draw an alluvial with 1 diagram 1 col and a single block on tesax
         alluvial = Alluvial(x=[0, 2], ax=tesax, width=1)
         diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
@@ -177,10 +172,8 @@ class TestAlluvialStyling:
         alluvial.finish()
 
         # set common limits and axis styling
-        refax.set_xlim(-1, 4)
-        tesax.set_xlim(-1, 4)
-        refax.set_ylim(-1, 6)
-        tesax.set_ylim(-1, 6)
+        refax.set_xlim(*tesax.get_xlim())
+        refax.set_ylim(*tesax.get_ylim())
 
     @check_figures_equal()
     def test_styling_hierarchy(self, fig_test, fig_ref):

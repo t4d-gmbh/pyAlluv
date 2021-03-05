@@ -103,6 +103,13 @@ def _normed_collection_props(props):
     return cbook.normalize_kwargs(props, PatchCollection)
 
 
+def _update_1dlimits(limits, newmin, newmax):
+    if limits is None:
+        return newmin, newmax
+    omin, omax = limits
+    return min(omin, newmin), max(omax, newmax)
+
+
 class _ArtistProxy:
     """
     Proxy class for `Artist` subclasses used to draw the various element in an
@@ -297,6 +304,10 @@ class _Block(_ArtistProxy):
         """Return the y coordinate of the anchor point."""
         return self._ya
 
+    def get_datalim(self,):
+        """Return the bounds (x0, y0, width, height) in data coordinates."""
+        return self.get_x(), self.get_y(), self.get_width(), self.get_height()
+
     def get_bounds(self,):
         """Return the bounds (x0, y0, width, height) of `.Bbox`."""
         return self._artist.get_bbox().bounds
@@ -452,6 +463,7 @@ class _Block(_ArtistProxy):
     def add_artist(self, ax):
         self._artist = ax.add_patch(self._artist)
 
+    # TODO: why is this here?
     def update_locations(self,):
         x0, y0, x1, y1 = self._artist._convert_units()
 
@@ -1020,7 +1032,7 @@ class SubDiagram:
 
         # TODO: below attributes need to be handled
         self._redistribute_vertically = 4
-        self.y_min, self.y_max = None, None
+        self._ymin, self._ymax = None, None
 
         # TODO: update blockprops with kwargs? at least handle label
         self._blocks = _ProxyCollection(_blocks, label=label,
@@ -1049,6 +1061,35 @@ class SubDiagram:
         self.set_layout(layout)
         self._label_margin = label_margin
         self._kwargs = _normed_collection_props(kwargs)
+
+    def get_datalim(self):
+        """Return the limits of the block collection in data units."""
+        # TODO: set x margin (for now just 1%)
+        _xmargin = 0.01 * (max(self._x) - min(self._x))
+        if self._hspace_combine == 'add':
+            _ymargin = self._hspace
+        else:
+            _ymargin = self._hspace / max(len(col) for col in self._columns)
+        x0, y0, width, height = self._columns[0][0].get_datalim()
+        xmin = x0 - _xmargin
+        ymin = y0 - _ymargin
+        if len(self._columns[0]) > 1:
+            for _block in self._columns[0][1:]:
+                x0, y0, width, height = _block.get_datalim()
+                xmin = min(xmin, x0 - _xmargin)
+                ymin = min(ymin, y0 - _ymargin)
+        x0, y0, width, height = self._columns[-1][0].get_datalim()
+        xmax = x0 + width + _xmargin
+        ymax = y0 + height + _ymargin
+        if len(self._columns[-1]) > 1:
+            for _block in self._columns[-1][1:]:
+                x0, y0, width, height = _block.get_datalim()
+                xmax = max(xmax, x0 + width + _xmargin)
+                ymax = max(ymax, y0 + height + _ymargin)
+        return xmin, ymin, xmax, ymax
+
+    def get_ylim(self):
+        return (self._ymin, self._ymax)
 
     def _populate_flowprops(self, flowprops):
         flowprops = _normed_collection_props(flowprops)
@@ -1181,18 +1222,18 @@ class SubDiagram:
                     # self._pairwise_swapping(col_id)
                     raise NotImplementedError("The optimized layout is not yet"
                                               " implemented")
-                # TODO: bad implementation, avoid duplicated get_y call
-                _min_y = min(self._columns[col_id],
-                             key=lambda x: x.get_y()).get_y() - 2 * col_hspace
-                _max_y_cluster = max(self._columns[col_id],
-                                     key=lambda x: x.get_y() + x.get_height())
-                _max_y = _max_y_cluster.get_y() + \
-                    _max_y_cluster.get_height() + 2 * col_hspace
-                # TODO: not doing anything with this so far...
-                self.y_min = min(self.y_min,
-                                 _min_y) if self.y_min is not None else _min_y
-                self.y_max = max(self.y_max,
-                                 _max_y) if self.y_max is not None else _max_y
+            # TODO: bad implementation, avoid duplicated get_y call
+            _min_y = min(self._columns[col_id],
+                         key=lambda x: x.get_y()).get_y() - 2 * col_hspace
+            _max_y_cluster = max(self._columns[col_id],
+                                 key=lambda x: x.get_y() + x.get_height())
+            _max_y = _max_y_cluster.get_y() + \
+                _max_y_cluster.get_height() + 2 * col_hspace
+            # TODO: not doing anything with this so far...
+            self._ymin = min(self._ymin,
+                             _min_y) if self._ymin is not None else _min_y
+            self._ymax = max(self._ymax,
+                             _max_y) if self._ymax is not None else _max_y
 
     def _decrease_flow_distances(self, col_id):
         _column = self._columns[col_id]
@@ -1647,9 +1688,7 @@ class Alluvial:
 
     def _add(self, columns, flows, x, label, yoff, **kwargs):
         _kwargs = _normed_collection_props(kwargs)
-        print(_kwargs)
         self._inject_defaults(_kwargs)
-        print(_kwargs)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
@@ -1849,17 +1888,25 @@ class Alluvial:
         self._diagrams.append(diagram)
 
     def _create_collections(self):
+        # TODO: setting data limits should work with the collections already
+        # > check how 3.4 does it
+        xlim = None
+        ylim = None
         for diagram in self._diagrams:
-            # create a PatchCollection out of all non-tagged blocks
+            # TODO: Probably should not mess with the zorder, but at least
+            # make it a property of Alluvial...
             diag_zorder = 4
-            print(diagram.y_min, diagram.y_max)
             diagram.determine_layout()
-            print(diagram.y_min, diagram.y_max)
             # self._inject_defaults(
             # check if it has a color, if not set to
             # next(self._color_cycler)
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **self._kwargs)
+            _xmin, _ymin, _xmax, _ymax = diagram.get_datalim()
+            xlim = _update_1dlimits(xlim, _xmin, _xmax)
+            ylim = _update_1dlimits(ylim, _ymin, _ymax)
+        self.ax.set_xlim(*xlim)
+        self.ax.set_ylim(*ylim)
 
     def finish(self,):
         """Draw the Alluvial diagram."""

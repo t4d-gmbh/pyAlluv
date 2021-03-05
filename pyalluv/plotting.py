@@ -1272,7 +1272,6 @@ class SubDiagram:
             Index of the column to reorder.
         """
         displace = self._yoff
-        print('displace', displace)
         _column = self._columns[column]
         for block in _column:
             block.set_y(displace)
@@ -1281,8 +1280,6 @@ class SubDiagram:
         low = _column[0].get_y()  # this is just self._yoff
         # this is just `displace`:
         high = _column[-1].get_y() + _column[-1].get_height()
-        print('high', high)
-        print('low', low)
 
         if layout == 'centered' or layout == 'optimized':
             _offset = 0.5 * (high - low)

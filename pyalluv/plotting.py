@@ -1,5 +1,7 @@
 import logging
+import itertools
 import numpy as np
+import matplotlib as mpl
 from matplotlib.cbook import index_of
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
@@ -93,6 +95,12 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
                 # TODO: handle outflows?
                 pass
     return flowmatrix, ext
+
+
+def _normed_collection_props(props):
+    if props is None:
+        return dict()
+    return cbook.normalize_kwargs(props, PatchCollection)
 
 
 class _ArtistProxy:
@@ -849,13 +857,17 @@ class _ProxyCollection(_ArtistProxy):
         """
         Convert the styling properties to lists matching self._blocks.
         """
-        indiv_props = dict()
-        for k, v in styleprops.items():
-            if k not in self._singular_props:
-                indiv_props[k] = [p.get_styling_prop(k, v)
-                                  for p in self._proxies]
-            else:
-                indiv_props[k] = v
+        _styprops = dict(styleprops)
+        indiv_props = {sp: _styprops.pop(sp, None)
+                       for sp in self._singular_props}
+        # normalize
+        _styprops = cbook.normalize_kwargs(_styprops, self._artistcls)
+        for k, v in _styprops.items():
+            # if k not in self._singular_props:
+            indiv_props[k] = [p.get_styling_prop(k, v)
+                              for p in self._proxies]
+            # else:
+            #    indiv_props[k] = v
         return indiv_props
 
     def _pre_creation(self, ax=None, **non_artits_props):
@@ -981,7 +993,7 @@ class SubDiagram:
             self._x = None
         self._yoff = yoff
         self._blockprops = blockprops or dict()
-        self._flowprops = flowprops or dict()
+        self._flowprops = self._populate_flowprops(flowprops)
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1036,7 +1048,12 @@ class SubDiagram:
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
         self._label_margin = label_margin
-        self._kwargs = kwargs
+        self._kwargs = _normed_collection_props(kwargs)
+
+    def _populate_flowprops(self, flowprops):
+        flowprops = _normed_collection_props(flowprops)
+        flowprops['alpha'] = flowprops.get('alpha', 0.7)
+        return flowprops
 
     def get_layout(self):
         """Get the layout of this diagram"""
@@ -1255,6 +1272,7 @@ class SubDiagram:
             Index of the column to reorder.
         """
         displace = self._yoff
+        print('displace', displace)
         _column = self._columns[column]
         for block in _column:
             block.set_y(displace)
@@ -1263,13 +1281,18 @@ class SubDiagram:
         low = _column[0].get_y()  # this is just self._yoff
         # this is just `displace`:
         high = _column[-1].get_y() + _column[-1].get_height()
+        print('high', high)
+        print('low', low)
+
         if layout == 'centered' or layout == 'optimized':
-            cent_offset = low + 0.5 * (high - low)
-            for block in _column:
-                block.set_y(block.get_y() - cent_offset)
+            _offset = 0.5 * (high - low)
         elif layout == 'top':
+            _offset = (high - low)
+        else:
+            _offset = 0
+        if _offset:
             for block in _column:
-                block.set_y(block.get_y() - high)
+                block.set_y(block.get_y() - _offset)
 
     def _swap_clusters(self, blocks, hspace, direction='backwards'):
         """
@@ -1461,7 +1484,10 @@ class Alluvial:
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
-        self._kwargs = dict(kwargs)
+        self._kwargs = _normed_collection_props(kwargs)
+        # self._kwargs = dict(kwargs)
+        # for now this simply uses colors
+        self._color_cycler = itertools.cycle(mpl.rcParams['axes.prop_cycle'])
         # TODO: if arguments for add are passed they cannot remain in kwargs
         if self._kwargs:
             flows = self._kwargs.pop('flows', None)
@@ -1471,6 +1497,7 @@ class Alluvial:
             tags = self._kwargs.pop('tags', None)
             # draw a diagram if *flows* were provided
             if flows is not None or ext is not None:
+                # TODO: Get rid of this separation
                 sdkw, self._kwargs = SubDiagram.separate_kwargs(
                     self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
@@ -1537,6 +1564,12 @@ class Alluvial:
             pass  # TODO: check extout format
         return columns, flows
 
+    def add_memberships(self, memberships, absentval=None, x=None, label=None,
+                        yoff=None, **kwargs):
+        return self._from_membership(memberships, absentval, x, label, yoff,
+                                     **kwargs)
+
+    # TODO: rename this to the above
     def _from_membership(self, memberships, absentval=None, x=None, label=None,
                          yoff=None, **kwargs):
         memberships = _to_valid_arrays(memberships, 'memberships', np.int)
@@ -1605,8 +1638,21 @@ class Alluvial:
                                   yoff=yoff, **kwargs)
         return alluvial
 
+    def _inject_defaults(self, kwargs):
+        """
+        This sets some default properties whenever a subdiagram is added.
+
+        """
+        fc = kwargs.get('facecolor', self._kwargs.get('facecolor', None))
+        if fc is None:
+            fc = next(self._color_cycler)['color']
+        kwargs['facecolor'] = fc
+
     def _add(self, columns, flows, x, label, yoff, **kwargs):
-        _kwargs = dict(kwargs)
+        _kwargs = _normed_collection_props(kwargs)
+        print(_kwargs)
+        self._inject_defaults(_kwargs)
+        print(_kwargs)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
@@ -1809,7 +1855,12 @@ class Alluvial:
         for diagram in self._diagrams:
             # create a PatchCollection out of all non-tagged blocks
             diag_zorder = 4
+            print(diagram.y_min, diagram.y_max)
             diagram.determine_layout()
+            print(diagram.y_min, diagram.y_max)
+            # self._inject_defaults(
+            # check if it has a color, if not set to
+            # next(self._color_cycler)
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **self._kwargs)
 

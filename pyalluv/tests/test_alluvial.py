@@ -156,12 +156,16 @@ class TestAlluvialStyling:
         # create the two figures
         tesax = fig_test.subplots()
         refax = fig_ref.subplots()
+        # ###
+        # refax
         # draw a simple Recangle on refax
         pc = []
         pc.append(Rectangle((0, 0), width=1, height=3, **style))
         pc.append(Rectangle((0, 4), width=1, height=1, **style))
         pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
         refax.add_collection(PatchCollection(pc, match_original=True, zorder=4))
+        # ###
+        # tesax
         # draw an alluvial with 1 diagram 1 col and a single block on tesax
         alluvial = Alluvial(x=[0, 2], ax=tesax, width=1)
         diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
@@ -170,6 +174,7 @@ class TestAlluvialStyling:
         block = diagram0.get_block((1, 0))  # column 1, block 0
         block.set_property('facecolor', 'red')
         alluvial.finish()
+        # ###
 
         # set common limits and axis styling
         refax.set_xlim(*tesax.get_xlim())

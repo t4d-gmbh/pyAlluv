@@ -13,6 +13,7 @@ from matplotlib.artist import Artist
 from matplotlib.path import Path
 from matplotlib.patches import Rectangle
 import matplotlib.patches as patches
+from matplotlib.rcsetup import cycler
 from matplotlib.legend import Legend
 # from datetime import datetime
 from bisect import bisect_left
@@ -95,12 +96,6 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
                 # TODO: handle outflows?
                 pass
     return flowmatrix, ext
-
-
-def _normed_collection_props(props):
-    if props is None:
-        return dict()
-    return cbook.normalize_kwargs(props, PatchCollection)
 
 
 def _update_1dlimits(limits, newmin, newmax):
@@ -746,6 +741,17 @@ class _Flow(_ArtistProxy):
         _ref_properties = {}
         for coloring in ['edgecolor', 'facecolor', 'color']:
             color = kwargs.pop(coloring, None)
+
+            ###
+            # TODO: handle the 'source'/'target'/'interpolate'/'migrate' cases
+            # from mpl
+            # def get_edgecolor(self):
+            #     if cbook._str_equal(self._edgecolors, 'face'):
+            #         return self.get_facecolor()
+            #     else:
+            #         return self._edgecolors
+            ###
+
             if color == 'source':
                 _ref_properties[coloring] = self.source
             elif color == 'target':
@@ -1005,7 +1011,7 @@ class SubDiagram:
             self._x = None
         self._yoff = yoff
         self._blockprops = blockprops or dict()
-        self._flowprops = self._populate_flowprops(flowprops)
+        self._flowprops = flowprops or dict()
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1060,7 +1066,8 @@ class SubDiagram:
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
         self._label_margin = label_margin
-        self._kwargs = _normed_collection_props(kwargs)
+        self._kwargs = cbook.normalize_kwargs(kwargs,
+                                              _ProxyCollection._artistcls)
 
     def get_datalim(self):
         """Return the limits of the block collection in data units."""
@@ -1090,11 +1097,6 @@ class SubDiagram:
 
     def get_ylim(self):
         return (self._ymin, self._ymax)
-
-    def _populate_flowprops(self, flowprops):
-        flowprops = _normed_collection_props(flowprops)
-        flowprops['alpha'] = flowprops.get('alpha', 0.7)
-        return flowprops
 
     def get_layout(self):
         """Get the layout of this diagram"""
@@ -1514,30 +1516,45 @@ class Alluvial:
             # TODO: not sure if specifying the ticks is necessary
             ax = fig.add_subplot(1, 1, 1, xticks=[], yticks=[])
         self.ax = ax
-        # store the inputs
-        self._blockprops = blockprops
-        self._flowprops = flowprops
+        # store normalized styling properties
+        self._blockprops = cbook.normalize_kwargs(blockprops,
+                                                  _ProxyCollection._artistcls)
+        self._flowprops = cbook.normalize_kwargs(flowprops,
+                                                 _ProxyCollection._artistcls)
+        # nothing to set for blocks for now
+        # self._inject_default_blockprops()
+        self._inject_default_flowprops()
+        # there is no imminent reason why to keep the original input, but...
+        self._original_blockprops = blockprops
+        self._original_flowprops = flowprops
         self._diagrams = []
         self._tags = []
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
-        self._kwargs = _normed_collection_props(kwargs)
-        # self._kwargs = dict(kwargs)
+        # TODO: decide: are kwargs for Alluvial exclusively for fast add/finish
+        # >  will decide if separation below is needed [SD.separate_kwargs(..]
+        self._defaults = dict()
+        _kwargs = cbook.normalize_kwargs(kwargs,
+                                         _ProxyCollection._artistcls)
+        fc = _kwargs.get('facecolor', None)
+        if fc is None:
+            self._color_cycler = itertools.cycle(mpl.rcParams['axes.prop_cycle'])
+        else:
+            # Note passing rgb/rgba arrays is not supported
+            self._color_cycler = itertools.cycle(cycler(color=fc))
         # for now this simply uses colors
-        self._color_cycler = itertools.cycle(mpl.rcParams['axes.prop_cycle'])
         # TODO: if arguments for add are passed they cannot remain in kwargs
-        if self._kwargs:
-            flows = self._kwargs.pop('flows', None)
-            ext = self._kwargs.pop('ext', None)
-            label = self._kwargs.pop('label', '')
-            fractionflow = self._kwargs.pop('fractionflow', False)
-            tags = self._kwargs.pop('tags', None)
+        if _kwargs:
+            flows = _kwargs.pop('flows', None)
+            ext = _kwargs.pop('ext', None)
+            label = _kwargs.pop('label', '')
+            fractionflow = _kwargs.pop('fractionflow', False)
+            tags = _kwargs.pop('tags', None)
             # draw a diagram if *flows* were provided
+            # TODO: Get rid of this separation
+            sdkw, self._defaults = SubDiagram.separate_kwargs(_kwargs)
             if flows is not None or ext is not None:
-                # TODO: Get rid of this separation
-                sdkw, self._kwargs = SubDiagram.separate_kwargs(
-                    self._kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          label=label, yoff=0,
                          fractionflow=fractionflow, tags=tags,
@@ -1676,19 +1693,21 @@ class Alluvial:
                                   yoff=yoff, **kwargs)
         return alluvial
 
-    def _inject_defaults(self, kwargs):
-        """
-        This sets some default properties whenever a subdiagram is added.
+    def _inject_default_blockprops(self,):
+        """Completing styling properties of blocks with sensible defaults."""
+        pass
 
-        """
-        fc = kwargs.get('facecolor', self._kwargs.get('facecolor', None))
-        if fc is None:
-            fc = next(self._color_cycler)['color']
-        kwargs['facecolor'] = fc
+    def _inject_default_flowprops(self,):
+        """Completing styling properties of flows with sensible defaults."""
+        self._flowprops['alpha'] = self._flowprops.get('alpha', 0.7)
+
+    def get_defaults(self,):
+        self._defaults['facecolor'] = next(self._color_cycler)['color']
+        return self._defaults
 
     def _add(self, columns, flows, x, label, yoff, **kwargs):
-        _kwargs = _normed_collection_props(kwargs)
-        self._inject_defaults(_kwargs)
+        _kwargs = cbook.normalize_kwargs(kwargs,
+                                         _ProxyCollection._artistcls)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
@@ -1897,11 +1916,12 @@ class Alluvial:
             # make it a property of Alluvial...
             diag_zorder = 4
             diagram.determine_layout()
-            # self._inject_defaults(
+            # self._update_defaults(
             # check if it has a color, if not set to
             # next(self._color_cycler)
+            defaults = self.get_defaults()
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
-                                   **self._kwargs)
+                                   **defaults)
             _xmin, _ymin, _xmax, _ymax = diagram.get_datalim()
             xlim = _update_1dlimits(xlim, _xmin, _xmax)
             ylim = _update_1dlimits(ylim, _ymin, _ymax)

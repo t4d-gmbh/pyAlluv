@@ -28,17 +28,8 @@ __author__ = 'Jonas I. Liechti'
 def _to_valid_arrays(data, attribute, dtype=np.float64):
     if data is None:
         return None
-    # if dim == 1:
-    #     _atleast = np.atleast_1d
-    # elif dim == 2:
-    #     _atleast = np.atleast_2d
-    # else:
-    #     raise ValueError(f'*dim* can only be 1 or 2, {dim} is not allowed')
-
     if hasattr(data, 'index') and hasattr(data, 'values'):
         return data.values
-    #
-    # return _atleast(*data)
     try:
         data = np.asarray(data, dtype=dtype)
     except ValueError:
@@ -116,8 +107,7 @@ class _ArtistProxy:
     _artistcls = Artist  # derived must overwrite
 
     def __init__(self, label=None, **kwargs):
-        """
-        """
+        """TODO: write docstring."""
         # TODO: not sure if stale is needed for this
         self.stale = True
         self._tags = []
@@ -151,6 +141,7 @@ class _ArtistProxy:
         return True if len(self._tags) else False
 
     def set_property(self, prop, value):
+        """TODO: write docstring."""
         self._kwargs.update(cbook.normalize_kwargs({prop: value}))
 
     def set_styling(self, props):
@@ -203,6 +194,7 @@ class _ArtistProxy:
         pass
 
     def _applicable_properties(self, props):
+        """TODO: write docstring."""
         applicable = dict()
         nonapp = dict()
         for k, v in props.items():
@@ -237,8 +229,7 @@ class _ArtistProxy:
         nonapp_props = dict()
         # process the tags
         if self.is_tagged:
-            # TODO:
-            # gather all properties from its tag
+            # TODO: gather all properties from its tag
             tagprops, nonapp_props = self._from_tags()
             _props.update(tagprops)
         # finally update with block specific styling
@@ -254,17 +245,15 @@ class _ArtistProxy:
         raise NotImplementedError('Derived must override')
 
     def get_artist(self,):
+        """TODO: write docstring."""
         if self._artist is None:
             raise ValueError("The artist has not been created.")
         return self._artist
 
 
-@cbook._define_aliases({
-    "verticalalignment": ["va"],
-    "horizontalalignment": ["ha"],
-    "width": ["w"],
-    "height": ["h"]
-})
+@cbook._define_aliases({"verticalalignment": ["va"],
+                        "horizontalalignment": ["ha"], "width": ["w"],
+                        "height": ["h"]})
 class _Block(_ArtistProxy):
     """
     A Block in an Alluvial diagram.
@@ -445,12 +434,14 @@ class _Block(_ArtistProxy):
         self.stale = True
 
     def _set_horizontalalignment(self, align):
+        """TODO: write docstring."""
         # TODO: uncomment once in mpl
         # _api.check_in_list(['center', 'left', 'right'], align=align)
         self._horizontalalignment = align
         self.stale = True
 
     def _set_verticalalignment(self, align):
+        """TODO: write docstring."""
         # TODO: uncomment once in mpl
         # _api.check_in_list(['center', 'top', 'bottom'], align=align)
         self._verticalalignment = align
@@ -465,25 +456,28 @@ class _Block(_ArtistProxy):
         self._set_verticalalignment(align)
 
     def set_outflows(self, outflows):
+        """TODO: write docstring."""
         self._outflows = outflows
 
     def set_inflows(self, inflows):
+        """TODO: write docstring."""
         self._inflows = inflows
 
-    xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
-    ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
-    y = property(get_y, set_y, doc="The y coordinate of the block bottom")
-    x = property(get_x, None, doc="The x coordinate of the block bottom")
-    inflows = property(get_inflows, set_inflows, doc="List of `._Flow` objects"
-                                                     "entering the block.")
-    outflows = property(get_outflows, set_outflows, doc="List of `._Flow`"
-                                                        "objects leaving the"
-                                                        "block.")
+    # xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
+    # ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
+    # y = property(get_y, set_y, doc="The y coordinate of the block bottom")
+    # x = property(get_x, None, doc="The x coordinate of the block bottom")
+    inflows = property(get_inflows, set_inflows,
+                       doc="List of `._Flow` objects entering the block.")
+    outflows = property(get_outflows, set_outflows,
+                        doc="List of `._Flow` objects leaving the block.")
 
     def add_outflow(self, outflow):
+        """TODO: write docstring."""
         self._outflows.append(outflow)
 
     def add_inflow(self, inflow):
+        """TODO: write docstring."""
         self._inflows.append(inflow)
 
     def _create_artist(self, ax, **kwargs):
@@ -492,13 +486,11 @@ class _Block(_ArtistProxy):
                                        axes=ax, **kwargs)
 
     def add_artist(self, ax):
+        """TODO: write docstring."""
         self._artist = ax.add_patch(self._artist)
 
-    # TODO: why is this here?
-    def update_locations(self,):
-        x0, y0, x1, y1 = self._artist._convert_units()
-
     def _set_loc_out_flows(self,):
+        """TODO: write docstring."""
         yc = self.get_yc()
         for out_flow in self._outflows:
             in_loc = None
@@ -531,6 +523,7 @@ class _Block(_ArtistProxy):
             out_flow.out_loc = out_loc
 
     def _sort_out_flows(self,):
+        """TODO: write docstring."""
         _top_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
@@ -567,6 +560,7 @@ class _Block(_ArtistProxy):
         self._outflows = [self._outflows[i] for i in sorted_idx]
 
     def _sort_in_flows(self,):
+        """TODO: write docstring."""
         _top_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
@@ -603,6 +597,7 @@ class _Block(_ArtistProxy):
         self._inflows = [self._inflows[i] for i in sorted_idx]
 
     def get_loc_out_flow(self, flow_width, out_loc, in_loc):
+        """TODO: write docstring."""
         outloc = self.get_outloc()
         anchor_out = (
             outloc[out_loc][0],
@@ -616,6 +611,7 @@ class _Block(_ArtistProxy):
         return anchor_out, top_out
 
     def _set_anchor_out_flows(self,):
+        """TODO: write docstring."""
         for out_flow in self._outflows:
             out_width = out_flow.flow \
                 if out_flow.out_loc == 'bottom' else - out_flow.flow
@@ -624,6 +620,7 @@ class _Block(_ArtistProxy):
             )
 
     def _set_anchor_in_flows(self,):
+        """TODO: write docstring."""
         for in_flow in self._inflows:
             in_width = in_flow.flow \
                 if in_flow.in_loc == 'bottom' else - in_flow.flow
@@ -632,6 +629,7 @@ class _Block(_ArtistProxy):
             )
 
     def get_loc_in_flow(self, flow_width, out_loc, in_loc):
+        """TODO: write docstring."""
         inloc = self.get_inloc()
         anchor_in = (
             inloc[in_loc][0],
@@ -645,11 +643,14 @@ class _Block(_ArtistProxy):
         return anchor_in, top_in
 
     def get_inloc(self,):
+        """TODO: write docstring."""
+        # TODO: dont use dict here.
         x0, y0, width, height = self.get_bounds()
         return {'bottom': (x0, y0),  # left, bottom
                 'top': (x0, y0 + height)}  # left, top
 
     def get_outloc(self,):
+        """TODO: write docstring."""
         # _width = self.get_width()
         x0, y0, width, height = self.get_bounds()
         # return {'top': (x0 + _width, y0 + self.get_height()),  # top right
@@ -658,6 +659,7 @@ class _Block(_ArtistProxy):
                 'bottom': (x0 + width, y0)}  # right, bottom
 
     def handle_flows(self,):
+        """TODO: write docstring."""
         self._set_loc_out_flows()
         self._sort_in_flows()
         self._sort_out_flows()
@@ -695,31 +697,13 @@ class _Flow(_ArtistProxy):
         """
         # self._interp_steps = kwargs.pop('interpolation_steps', 1)
         self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
-        # self.default_fc = kwargs.pop('default_fc', 'gray')
         self.default_fc = 'gray'
-        # self.default_ec = kwargs.pop('default_ec', 'gray')
         self.default_ec = 'gray'
-        # self.default_alpha = kwargs.pop('default_alpha', 0.3)
-        # self.default_alpha = kwargs.pop(
-        #         'default_alpha',
-        #         kwargs.get('alpha', {}).pop('default', 0.3)
-        #         )
         self.default_alpha = 1.0
 
         super().__init__(label=label, **kwargs)
 
         self._kwargs = kwargs
-
-        # TODO: needs to be deleted
-        # self._kwargs['lw'] = self._kwargs.pop(
-        #     'linewidth', self._kwargs.pop('lw', 0.0)
-        # )
-
-        # if isinstance(flow, (list, tuple)):
-        #     self.flow = len(flow)
-        # else:
-        #     self.flow = flow
-
         self.source = source
         self.target = target
         self._original_flow = flow
@@ -732,10 +716,13 @@ class _Flow(_ArtistProxy):
         self.stale = True
 
     def _set_from_artist(self, attr, artist):
+        """TODO: write docstring."""
         name = '_%s' % attr
         setattr(self._artist, name, getattr(artist, name))
 
+    # TODO: unused > should this be removed?
     def _update_artist_from(self, other):
+        """TODO: write docstring."""
         # For some properties we don't need or don't want to go through the
         # getters/setters, so we just copy them directly.
         self._artist._transform = other._transform
@@ -774,6 +761,7 @@ class _Flow(_ArtistProxy):
 
     # TODO: needs updating (no modifications of kwargs)
     def _create_artist(self, ax, **kwargs):
+        """TODO: write docstring."""
         _ref_properties = {}
         for coloring in ['edgecolor', 'facecolor', 'color']:
             color = kwargs.pop(coloring, None)
@@ -869,6 +857,7 @@ class _Flow(_ArtistProxy):
             self._set_from_artist(prop, ref_artist)
 
     def add_artist(self, ax):
+        """TODO: write docstring."""
         self._artist = ax.add_patch(self._artist)
 
 
@@ -925,6 +914,7 @@ class _ProxyCollection(_ArtistProxy):
         return indiv_props
 
     def _pre_creation(self, ax=None, **non_artits_props):
+        """TODO: write docstring."""
         for proxy in self._proxies:
             proxy.create_artist(ax=ax, **non_artits_props)
 
@@ -952,7 +942,8 @@ class _ProxyCollection(_ArtistProxy):
                 np.asarray([getattr(proxy, self._cmap_data)
                             for proxy in self._proxies]))
 
-    def add_artist(self, ax):
+    def add_artist_to_axes(self, ax):
+        """Adding the artist to an `~.axes.Axes`."""
         self._artist = ax.add_collection(self._artist)
 
     def add_proxy(self, proxy):
@@ -975,9 +966,11 @@ class Tag:
         self._kwargs = kwargs
 
     def update(self, kw):
+        """TODO: write docstring."""
         self._kwargs.update(kw)
 
     def get_props(self,):
+        """TODO: write docstring."""
         return self._kwargs
 
 
@@ -1041,7 +1034,7 @@ class SubDiagram:
 
         Other Parameters (TODO)
         ----------------
-        **kwargs : Allowed are all `.Collection` properties for Blocks and Flows
+        **kwargs : Allowed are `.Collection` properties for Blocks and Flows
             Define the styling to apply to all elements in this subdiagram:
 
             %(Collection_kwdoc)s
@@ -1163,9 +1156,11 @@ class SubDiagram:
         return self._columns
 
     def get_column(self, col_id):
+        """TODO: write docstring."""
         return self._columns[col_id]
 
     def get_block(self, identifier):
+        """TODO: write docstring."""
         if isinstance(identifier, int):
             return self._blocks[identifier]
         else:
@@ -1200,6 +1195,7 @@ class SubDiagram:
         self.stale = True
 
     def generate_layout(self, ):
+        """TODO: write docstring."""
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
             self.distribute_blocks(col_id)
@@ -1213,12 +1209,14 @@ class SubDiagram:
         self.stale = True
 
     def add_flow(self, column, flow):
+        """TODO: write docstring."""
         # TODO: _columns can only contain indices for blocks
         # self._columns[column].append(flow)
         self.stale = True
         pass
 
     def get_column_hspace(self, col_id):
+        """TODO: write docstring."""
         if self._hspace_combine == 'add':
             return self._hspace
         else:
@@ -1239,8 +1237,6 @@ class SubDiagram:
           This must be a `key` of the :attr:`~.Alluvial.clusters`
           attribute.
         """
-        # TODO: not sure why this was used
-        # x_pos = self._x[col_id]
         nbr_blocks = len(self._columns[col_id])
         layout = self.get_column_layout(col_id)
         col_hspace = self.get_column_hspace(col_id)
@@ -1282,7 +1278,6 @@ class SubDiagram:
                                  key=lambda x: x.get_y() + x.get_height())
             _max_y = _max_y_cluster.get_y() + \
                 _max_y_cluster.get_height() + 2 * col_hspace
-            # TODO: not doing anything with this so far...
             self._ymin = min(self._ymin,
                              _min_y) if self._ymin is not None else _min_y
             self._ymax = max(self._ymax,
@@ -1290,6 +1285,7 @@ class SubDiagram:
         self.stale = False
 
     def _decrease_flow_distances(self, col_id):
+        """TODO: write docstring."""
         _column = self._columns[col_id]
         # TODO: does not really make sense to recompute them here
         nbr_blocks = len(_column)
@@ -1329,6 +1325,7 @@ class SubDiagram:
                 break
 
     def _pairwise_swapping(self, col_id):
+        """TODO: write docstring."""
         # TODO: this is broken: update the ordering then call _reorder_column
         _column = self._columns[col_id]
         nbr_blocks = len(_column)
@@ -1412,10 +1409,8 @@ class SubDiagram:
                 ) / sum(weights)
         # assert n1.get_y() < n2.get_y()
         # TODO: Cannot recreate the thought process behind this...
-        inv_mid_height = [
-            blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
-            blocks[0].get_y() + 0.5 * blocks[1].get_height()
-        ]
+        inv_mid_height = [blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
+                          blocks[0].get_y() + 0.5 * blocks[1].get_height()]
         squared_diff_inf = {}
         for i, block in enumerate(blocks):
             weights = []
@@ -1459,18 +1454,19 @@ class SubDiagram:
         return sdkwargs, other_kwargs
 
     def create_artists(self, ax, **kwargs):
+        """TODO: write docstring."""
         if self.stale:
             self.generate_layout()
         _kwargs = dict(kwargs)
         _kwargs.update(self._kwargs)
         _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
         self._blocks.create_artist(ax=ax, **_blockkws)
-        self._blocks.add_artist(ax)
+        self._blocks.add_artist_to_axes(ax)
         for block in self._blocks:
             block.handle_flows()
         _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
         self._flows.create_artist(ax=ax, **_flowkws)
-        self._flows.add_artist(ax)
+        self._flows.add_artist_to_axes(ax)
 
 
 class Alluvial:
@@ -1594,11 +1590,11 @@ class Alluvial:
                                          _ProxyCollection._artistcls)
         fc = _kwargs.get('facecolor', None)
         if fc is None:
-            self._color_cycler = itertools.cycle(mpl.rcParams['axes.prop_cycle'])
+            self._color_cycler = itertools.cycle(
+                mpl.rcParams['axes.prop_cycle'])
         else:
             # Note passing rgb/rgba arrays is not supported
             self._color_cycler = itertools.cycle(cycler(color=fc))
-        # for now this simply uses colors
         # TODO: if arguments for add are passed they cannot remain in kwargs
         if _kwargs:
             # ###
@@ -1647,6 +1643,7 @@ class Alluvial:
         return self._diagrams
 
     def get_diagram(self, diag_id):
+        """TODO: write docstring."""
         return self._diagrams[diag_id]
 
     def _to_cols_and_flows(self, cinit, flows, ext, extout, fractionflow):
@@ -1678,10 +1675,12 @@ class Alluvial:
 
     def add_memberships(self, memberships, absentval=None, x=None, label=None,
                         yoff=None, **kwargs):
+        """TODO: write docstring."""
         return self._from_membership(memberships, absentval, x, label, yoff,
                                      **kwargs)
 
     # TODO: rename this to the above
+    # TODO: add support for changing axis=0/1 in case of pandas df
     def _from_membership(self, memberships, absentval=None, x=None, label=None,
                          yoff=None, **kwargs):
         memberships = _to_valid_arrays(memberships, 'memberships', np.int)
@@ -1759,10 +1758,12 @@ class Alluvial:
         self._flowprops['alpha'] = self._flowprops.get('alpha', 0.7)
 
     def get_defaults(self,):
+        """TODO: write docstring."""
         self._defaults['facecolor'] = next(self._color_cycler)['color']
         return self._defaults
 
     def _add(self, columns, flows, x, label, yoff, tags=None, **kwargs):
+        """TODO: write docstring."""
         # TODO: handle tags: not actually tags, but str to define ensembles
         # like 'columns', 'index', etc. might also get rid of this.
         _kwargs = cbook.normalize_kwargs(kwargs,
@@ -1776,9 +1777,6 @@ class Alluvial:
         self._dlabels.append(label or f'diagram-{self._diagc}')
         self._diagc += 1
         return diagram
-
-    def add_from_memberships(self,):
-        raise NotImplementedError('Missing implementation')
 
     def add(self, flows, ext=None, extout=None, x=None, label=None, yoff=0,
             fractionflow=False, tags=None, **kwargs):
@@ -1951,6 +1949,7 @@ class Alluvial:
                          yoff=yoff, tags=tags, **kwargs)
 
     def _determine_x(self, x, columns):
+        """TODO: write docstring."""
         if x is not None:
             x = _to_valid_arrays(x, 'x')
         elif self._x is not None:
@@ -1966,8 +1965,7 @@ class Alluvial:
         self._diagrams.append(diagram)
 
     def _create_collections(self):
-        # TODO: setting data limits should work with the collections already
-        # > check how 3.4 does it
+        """TODO: write docstring."""
         xlim = None
         ylim = None
         for diagram in self._diagrams:
@@ -2024,7 +2022,7 @@ class Alluvial:
         """
         Tagging a selection of blocks.
 
-
+        TODO: description of selection procedure passing slices to args.
         """
         if isinstance(tag, str):
             tag = self._tags[tag]
@@ -2059,12 +2057,8 @@ class Alluvial:
                 for block in col[_bselect]:
                     block.add_tag(tag)
 
-    def _init_tag(self, label, kw):
-        # TODO: actually we do not need tags > use dict?
-        # self._tags[label] = kw
-        self._tags[label] = Tag(label, **kw)
-
     def update_tag(self, label, **kwargs):
+        """TODO: write docstring."""
         if label not in self._tags:
             _log.warning(
                 f"The tag '{label}' is not registered.You must"
@@ -2075,6 +2069,7 @@ class Alluvial:
         tag.update(kwargs)
 
 
+# TODO: legend handler for subdiagram and for alluvial diagram
 class AlluvialHandler:
     def legend_artist(self, legend, orig_handle, fontsize, handlebox):
         x0, y0 = handlebox.xdescent, handlebox.ydescent

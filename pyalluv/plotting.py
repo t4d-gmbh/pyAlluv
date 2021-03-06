@@ -1010,6 +1010,7 @@ class SubDiagram:
         else:
             self._x = None
         self._yoff = yoff
+        # Note: both _block-/_flowprops must be normalized already
         self._blockprops = blockprops or dict()
         self._flowprops = flowprops or dict()
 
@@ -1532,8 +1533,6 @@ class Alluvial:
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
-        # TODO: decide: are kwargs for Alluvial exclusively for fast add/finish
-        # >  will decide if separation below is needed [SD.separate_kwargs(..]
         self._defaults = dict()
         _kwargs = cbook.normalize_kwargs(kwargs,
                                          _ProxyCollection._artistcls)
@@ -1546,14 +1545,16 @@ class Alluvial:
         # for now this simply uses colors
         # TODO: if arguments for add are passed they cannot remain in kwargs
         if _kwargs:
+            # ###
+            # TODO: kw separation should be a method of SubDiagram entirely
             flows = _kwargs.pop('flows', None)
             ext = _kwargs.pop('ext', None)
             label = _kwargs.pop('label', '')
             fractionflow = _kwargs.pop('fractionflow', False)
             tags = _kwargs.pop('tags', None)
-            # draw a diagram if *flows* were provided
-            # TODO: Get rid of this separation
+            # draw a diagram if *flows* are provided
             sdkw, self._defaults = SubDiagram.separate_kwargs(_kwargs)
+            # ###
             if flows is not None or ext is not None:
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          label=label, yoff=0,

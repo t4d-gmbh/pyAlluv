@@ -112,7 +112,6 @@ test_ids = ['block-sorting']
     'flows, ext, fractf, layout, ref_columns', test_data, ids=test_ids
 )
 class TestAlluvialLayout:
-
     @pytest.mark.devtest
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
@@ -183,31 +182,45 @@ class TestAlluvialStyling:
     @check_figures_equal()
     def test_styling_hierarchy(self, fig_test, fig_ref):
         # dev-test
-        # Test styling hierarchy: Block/Flow > SubDiagram > Alluvial
+        # Test styling hierarchy: Block/Flow > Tags > SubDiagram > Alluvial
         # set styling
         style = dict(ec='green', lw=2)
+        alluv_c, subd_c, tag_c, block_c = 'blue', 'green', 'red', 'yellow'
         # create the two figures
         tesax = fig_test.subplots()
         refax = fig_ref.subplots()
         # draw a simple Recangle on refax
-        pc = []
         yoff = 4
-        pc.append(Rectangle((0, yoff), width=1, height=1, fc='blue', **style))
-        pc.append(Rectangle((0, 0), width=1, height=3, fc='yellow', **style))
-        pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
+        # ###
+        # refax
+        pc = []
+        # Alluvial style
+        pc.append(Rectangle((0, yoff), width=1, height=1, fc=alluv_c, **style))
+        # SubD style
+        pc.append(Rectangle((0, 0), width=1, height=3, fc=subd_c, **style))
+        # Tag style
+        pc.append(Rectangle((2, 0), width=1, height=2, fc=tag_c, **style))
+        # Block style
+        pc.append(Rectangle((2, yoff), width=1, height=1, fc=block_c, **style))
         refax.add_collection(PatchCollection(pc, match_original=True))
+        # ###
+        # texax
         # set fc to blue for the entire alluvial plot
-        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc='blue', **style)
-        # set fc to yellow for first subdiagram
-        diagram0 = alluvial.add(flows=None, ext=[[3], [2]], layout='bottom',
-                                fc='yellow', **style)
-        # do not set fc for the second fc -> inherit from alluvial
-        alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom',
-                     **style)
+        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc=alluv_c, **style)
+        # Test defaults form Alluvial:
+        alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom', **style)
+        # Test SubD > Alluvial:
+        diagram1 = alluvial.add(flows=None, ext=[[3], [3, 1]], layout='bottom',
+                                fc=subd_c, **style)
+        # Tag > SubD:
+        tag = alluvial.register_tag('tag0', fc=tag_c)
+        alluvial.tag_blocks(tag, 0, 1, None)
+        # B  > SubDiagram:
         # set the styling of a single block in an already styled subdiagram
-        block = diagram0.get_block((1, 0))  # column 1, block 0
-        block.set_property('facecolor', 'red')
+        block = diagram1.get_block((1, 1))  # column 1, block 0
+        block.set_property('facecolor', block_c)
         alluvial.finish()
+        # ###
 
         # set common limits and axis styling
         refax.set_xlim(-1, 4)

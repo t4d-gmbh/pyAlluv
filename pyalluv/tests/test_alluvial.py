@@ -199,7 +199,7 @@ class TestAlluvialStyling:
         # SubD style
         pc.append(Rectangle((0, 0), width=1, height=3, fc=subd_c, **style))
         # Tag style
-        pc.append(Rectangle((2, 0), width=1, height=2, fc=tag_c, **style))
+        pc.append(Rectangle((2, 0), width=1, height=3, fc=tag_c, **style))
         # Block style
         pc.append(Rectangle((2, yoff), width=1, height=1, fc=block_c, **style))
         refax.add_collection(PatchCollection(pc, match_original=True))
@@ -214,7 +214,7 @@ class TestAlluvialStyling:
                                 fc=subd_c, **style)
         # Tag > SubD:
         tag = alluvial.register_tag('tag0', fc=tag_c)
-        alluvial.tag_blocks(tag, 0, 1, None)
+        alluvial.tag_blocks(tag, 1, 1, None)
         # B  > SubDiagram:
         # set the styling of a single block in an already styled subdiagram
         block = diagram1.get_block((1, 1))  # column 1, block 0

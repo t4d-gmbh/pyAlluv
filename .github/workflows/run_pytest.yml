@@ -30,6 +30,8 @@ jobs:
         git clone https://github.com/matplotlib/matplotlib.git
         cd matplotlib
         python -m pip install .
+        cd ../
+        rm -rf matplotlib
         python -m pip install pandas
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8

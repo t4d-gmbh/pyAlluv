@@ -208,6 +208,12 @@ class _ArtistProxy:
     def create_artist(self, ax, **props):
         """Create the artist of this proxy."""
         _props = cbook.normalize_kwargs(props, self._artistcls)
+        # process the tags
+        if self.is_tagged:
+            # TODO:
+            # gather all properties from its tag (only applicable and normalized)
+            tag_props = {}
+            _props.update(tag_props)
         _props.update(self._kwargs)
         _props, _nonprops = self._applicable_properties(_props)
         self._pre_creation(ax, **_nonprops)
@@ -935,7 +941,11 @@ class Tag:
         label : str, optional
             The label of this collection.
         """
-        pass
+        self.label = label
+        self._kwargs = kwargs
+
+    def update(self, kw):
+        self._kwargs.update(kw)
 
 
 class SubDiagram:
@@ -1069,9 +1079,17 @@ class SubDiagram:
         self._label_margin = label_margin
         self._kwargs = cbook.normalize_kwargs(kwargs,
                                               _ProxyCollection._artistcls)
+        self.stale = True
+
+    def __iter__(self):
+        if self.stale:
+            self.generate_layout()
+        return iter(self.get_columns())
 
     def get_datalim(self):
         """Return the limits of the block collection in data units."""
+        if self.stale:
+            self.distribute_blocks()
         # TODO: set x margin (for now just 1%)
         _xmargin = 0.01 * (max(self._x) - min(self._x))
         if self._hspace_combine == 'add':
@@ -1096,15 +1114,14 @@ class SubDiagram:
                 ymax = max(ymax, y0 + height + _ymargin)
         return xmin, ymin, xmax, ymax
 
-    def get_ylim(self):
-        return (self._ymin, self._ymax)
-
     def get_layout(self):
         """Get the layout of this diagram"""
         return self._layout
 
     def get_columns(self,):
         """Get all columns of this subdiagram"""
+        if self.stale:
+            self.generate_layout()
         return self._columns
 
     def get_column(self, col_id):
@@ -1142,30 +1159,25 @@ class SubDiagram:
                 # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
                 #                    layout=layout)
                 self._layout.append(_layout)
+        self.stale = True
 
-    def determine_layout(self, ):
+    def generate_layout(self, ):
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
             self.distribute_blocks(col_id)
-
-    # # TODO: This is probably not used, right?!
-    # def set_paths(self, columns):
-    #     """Set the paths for untagged blocks of the subdiagram."""
-    #     self._paths = []
-    #     for col in columns:
-    #         self._paths.extend(
-    #             [p.get_transform().transform_path(p.get_path())
-    #              for p in col
-    #              if not p.is_tagged])
+        # TODO: move columns vert. to minimize vertical comp. flows attached
+        self.stale = False
 
     def add_block(self, column: int, block):
         """Add a Block to a column."""
-        super().add_proxy(block)
+        self._blocks.add_proxy(block)
         self._columns[column].append(block)
+        self.stale = True
 
     def add_flow(self, column, flow):
         # TODO: _columns can only contain indices for blocks
         # self._columns[column].append(flow)
+        self.stale = True
         pass
 
     def get_column_hspace(self, col_id):
@@ -1237,6 +1249,7 @@ class SubDiagram:
                              _min_y) if self._ymin is not None else _min_y
             self._ymax = max(self._ymax,
                              _max_y) if self._ymax is not None else _max_y
+        self.stale = False
 
     def _decrease_flow_distances(self, col_id):
         _column = self._columns[col_id]
@@ -1285,7 +1298,7 @@ class SubDiagram:
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
                 b1, b2 = _column[i - 1], _column[i]
-                if self._swap_clusters((b1, b2), col_hspace, 'backwards'):
+                if self._swap_blocks((b1, b2), col_hspace, 'backwards'):
                     b2.set_y(b1.get_y())
                     b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
                     _column[i - 1], _column[i] = b2, b1
@@ -1293,16 +1306,18 @@ class SubDiagram:
             for i in range(1, nbr_blocks):
                 b1 = _column[nbr_blocks - i - 1]
                 b2 = _column[nbr_blocks - i]
-                if self._swap_clusters((b1, b2), col_hspace, 'backwards'):
+                if self._swap_blocks((b1, b2), col_hspace, 'backwards'):
                     b2.set_y(b1.get_y())
                     b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
                     _column[nbr_blocks - i - 1] = b2
                     _column[nbr_blocks - i] = b1
+        self.stale = True
 
     def _reorder_column(self, col_id, ordering):
         """Update the ordering of blocks in a column"""
         _column = self._columns[col_id]
         self._columns[col_id] = [_column[newid] for newid in ordering]
+        self.stale = True
 
     def _update_ycoords(self, column: int, hspace, layout):
         """
@@ -1334,8 +1349,9 @@ class SubDiagram:
         if _offset:
             for block in _column:
                 block.set_y(block.get_y() - _offset)
+        self.stale = True
 
-    def _swap_clusters(self, blocks, hspace, direction='backwards'):
+    def _swap_blocks(self, blocks, hspace, direction='backwards'):
         """
         Check if swapping to blocks leads to shorter vertical flow distances.
         """
@@ -1405,6 +1421,8 @@ class SubDiagram:
         return sdkwargs, other_kwargs
 
     def create_artists(self, ax, **kwargs):
+        if self.stale:
+            self.generate_layout()
         _kwargs = dict(kwargs)
         _kwargs.update(self._kwargs)
         _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
@@ -1529,7 +1547,7 @@ class Alluvial:
         self._original_blockprops = blockprops
         self._original_flowprops = flowprops
         self._diagrams = []
-        self._tags = []
+        self._tags = dict()
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
@@ -1916,10 +1934,6 @@ class Alluvial:
             # TODO: Probably should not mess with the zorder, but at least
             # make it a property of Alluvial...
             diag_zorder = 4
-            diagram.determine_layout()
-            # self._update_defaults(
-            # check if it has a color, if not set to
-            # next(self._color_cycler)
             defaults = self.get_defaults()
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **defaults)
@@ -1935,7 +1949,7 @@ class Alluvial:
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
-    def register_tag(self, tag, **kwargs):
+    def register_tag(self, label, **kwargs):
         """
         Register a new tag.
 
@@ -1956,16 +1970,58 @@ class Alluvial:
         want to update the styling of an existing tag, use :meth:`update_tag`
         instead.
         """
-        if tag in self._tags:
+        if label in self._tags:
             _log.warning(
-                f"The tag '{tag}' has already been registered. Registering an"
+                f"The tag '{label}' was already registered. Registering an"
                 " existing tag again has no effect. You must use *update_tag*"
                 "if you want to change the styling of an existing tag."
             )
             return None
+        self._tags[label] = Tag(label=label, **kwargs)
 
-    def update_tag(self, tag, **kwargs):
-        pass  # TODO
+    def tag_blocks(self, tag, *args):
+        """
+        Tagging a selection of blocks.
+
+
+        """
+        if isinstance(tag, str):
+            tag = self._tags[tag]
+        # Note: there is really no point in tagging an entire subd
+        nbr_args = len(args)
+        if nbr_args == 1:
+            _subdselect = slice(None, None)
+            _colselect = slice(None, None)
+            _bselect = args[0]
+        elif nbr_args == 2:
+            _subdselect = slice(None, None)
+            _colselect = args[0]
+            _bselect = args[1]
+        elif nbr_args == 3:
+            _subdselect = args[0]
+            _colselect = args[1]
+            _bselect = args[2]
+        if _bselect is None:
+            _bselect = slice(None, None)
+        for diagram in self._diagrams[_subdselect]:
+            for col in diagram[_colselect]:
+                for block in col[_bselect]:
+                    block.add_tag(tag)
+
+    def _init_tag(self, label, kw):
+        # TODO: actually we do not need tags > use dict?
+        # self._tags[label] = kw
+        self._tags[label] = Tag(label, **kw)
+
+    def update_tag(self, label, **kwargs):
+        if label not in self._tags:
+            _log.warning(
+                f"The tag '{label}' is not registered.You must"
+                " register it first with *register_tag*."
+            )
+            return None
+        tag = self._tags[label]
+        tag.update(kwargs)
 
 
 class AlluvialHandler:

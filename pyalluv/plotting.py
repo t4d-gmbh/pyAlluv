@@ -118,6 +118,7 @@ class _ArtistProxy:
     def __init__(self, label=None, **kwargs):
         """
         """
+        # TODO: not sure if stale is needed for this
         self.stale = True
         self._tags = []
         self._artist = None
@@ -166,17 +167,27 @@ class _ArtistProxy:
 
     def get_styling_prop(self, prop: str, altval=None):
         """
-        Return the value of a specific styling property.
+        Return the value of a specific styling property attached to this proxy
+        or to one of its Tags.
         If the property is not set *altval* is returned instead.
 
         Parameters
         ----------
         prop : str
-            The name of the property to fetch.
+            The normalized name of the property to fetch.
         altval : Any (default: None)
             The value to return in case *prop* is not set.
+
+        Note that aliases are not allowed for *prop*. This is because tags are
+        included when trying to get the styling property and a single tag might
+        be associated to proxies of various artist subclasses that might not
+        all have the same set aliases.
         """
-        return self._kwargs.get(prop, self._original_kwargs.get(prop, altval))
+        if self.is_tagged:
+            tagprops, _ = self._from_tags()
+            # prefer values from tags over the alternative value
+            altval = tagprops.get(prop, altval)
+        return self._kwargs.get(prop, altval)
 
     @property
     def is_styled(self,):
@@ -205,18 +216,37 @@ class _ArtistProxy:
                 applicable[k] = v
         return applicable, nonapp
 
+    def _from_tags(self):
+        """
+        Get styling properties from all tags of this proxy.
+
+        Note that styling properties of more recently added tags are
+        prioritized, if multiple tags are present.
+        """
+        tagprops, nonapp_tagprops = dict(), dict()
+        for tag in self._tags:
+            _tprops, _natporop = self._applicable_properties(tag.get_props())
+            _tprops = cbook.normalize_kwargs(_tprops, self._artistcls)
+            tagprops.update(_tprops)
+            nonapp_tagprops.update(_natporop)
+        return tagprops, nonapp_tagprops
+
     def create_artist(self, ax, **props):
         """Create the artist of this proxy."""
         _props = cbook.normalize_kwargs(props, self._artistcls)
+        nonapp_props = dict()
         # process the tags
         if self.is_tagged:
             # TODO:
-            # gather all properties from its tag (only applicable and normalized)
-            tag_props = {}
-            _props.update(tag_props)
+            # gather all properties from its tag
+            tagprops, nonapp_props = self._from_tags()
+            _props.update(tagprops)
+        # finally update with block specific styling
         _props.update(self._kwargs)
-        _props, _nonprops = self._applicable_properties(_props)
-        self._pre_creation(ax, **_nonprops)
+        _props, _nonapp_props = self._applicable_properties(_props)
+        # combine the non-applicable properties from tags and proxy
+        nonapp_props.update(_nonapp_props)
+        self._pre_creation(ax, **nonapp_props)
         self._create_artist(ax, **_props)
 
     def add_artist(self, ax):
@@ -882,8 +912,8 @@ class _ProxyCollection(_ArtistProxy):
         Convert the styling properties to lists matching self._blocks.
         """
         _styprops = dict(styleprops)
-        indiv_props = {sp: _styprops.pop(sp, None)
-                       for sp in self._singular_props}
+        indiv_props = {sp: _styprops.pop(sp)
+                       for sp in self._singular_props if sp in _styprops}
         # normalize
         _styprops = cbook.normalize_kwargs(_styprops, self._artistcls)
         for k, v in _styprops.items():
@@ -946,6 +976,9 @@ class Tag:
 
     def update(self, kw):
         self._kwargs.update(kw)
+
+    def get_props(self,):
+        return self._kwargs
 
 
 class SubDiagram:
@@ -1085,6 +1118,11 @@ class SubDiagram:
         if self.stale:
             self.generate_layout()
         return iter(self.get_columns())
+
+    def __getitem__(self, key):
+        if self.stale:
+            self.generate_layout()
+        return self._columns[key]
 
     def get_datalim(self):
         """Return the limits of the block collection in data units."""
@@ -1724,7 +1762,9 @@ class Alluvial:
         self._defaults['facecolor'] = next(self._color_cycler)['color']
         return self._defaults
 
-    def _add(self, columns, flows, x, label, yoff, **kwargs):
+    def _add(self, columns, flows, x, label, yoff, tags=None, **kwargs):
+        # TODO: handle tags: not actually tags, but str to define ensembles
+        # like 'columns', 'index', etc. might also get rid of this.
         _kwargs = cbook.normalize_kwargs(kwargs,
                                          _ProxyCollection._artistcls)
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
@@ -1978,6 +2018,7 @@ class Alluvial:
             )
             return None
         self._tags[label] = Tag(label=label, **kwargs)
+        return self._tags[label]
 
     def tag_blocks(self, tag, *args):
         """
@@ -1989,6 +2030,18 @@ class Alluvial:
             tag = self._tags[tag]
         # Note: there is really no point in tagging an entire subd
         nbr_args = len(args)
+
+        # convert all input to slices
+        def _to_slice(arg):
+            if isinstance(arg, int):
+                return slice(arg, arg + 1)
+            elif isinstance(arg, slice):
+                return arg
+            elif arg is None:
+                return slice(None, None)
+            else:
+                return slice(*arg)
+        args = [_to_slice(arg) for arg in args]
         if nbr_args == 1:
             _subdselect = slice(None, None)
             _colselect = slice(None, None)
@@ -2001,8 +2054,6 @@ class Alluvial:
             _subdselect = args[0]
             _colselect = args[1]
             _bselect = args[2]
-        if _bselect is None:
-            _bselect = slice(None, None)
         for diagram in self._diagrams[_subdselect]:
             for col in diagram[_colselect]:
                 for block in col[_bselect]:

@@ -15,6 +15,7 @@ from matplotlib.patches import Rectangle
 import matplotlib.patches as patches
 from matplotlib.rcsetup import cycler
 from matplotlib.legend import Legend
+import matplotlib.ticker as mticker
 # from datetime import datetime
 from bisect import bisect_left
 
@@ -1041,10 +1042,7 @@ class SubDiagram:
 
         Note that *x* and *columns* must be sequences of the same length.
         """
-        if x is not None:
-            self._x = _to_valid_arrays(x, 'x')
-        else:
-            self._x = None
+        self._x = _to_valid_arrays(x, 'x')
         self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
         self._blockprops = blockprops or dict()
@@ -1166,6 +1164,10 @@ class SubDiagram:
         else:
             col_id, block_id = identifier
             return self._columns[col_id][block_id]
+
+    def get_x(self):
+        """Get the horizontal positioning of the columns"""
+        return self._x
 
     def set_column_layout(self, col_id, layout):
         """Set the layout for a single column"""
@@ -1567,7 +1569,7 @@ class Alluvial:
             import matplotlib.pyplot as plt
             fig = plt.figure()
             # TODO: not sure if specifying the ticks is necessary
-            ax = fig.add_subplot(1, 1, 1, xticks=[], yticks=[])
+            ax = fig.add_subplot(1, 1, 1, yticks=[])
         self.ax = ax
         # store normalized styling properties
         self._blockprops = cbook.normalize_kwargs(blockprops,
@@ -1585,6 +1587,10 @@ class Alluvial:
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
+        self._xlim = None
+        self._ylim = None
+        # how many x ticks are maximally shown
+        self.max_nbr_xticks = 10
         self._defaults = dict()
         _kwargs = cbook.normalize_kwargs(kwargs,
                                          _ProxyCollection._artistcls)
@@ -1966,8 +1972,7 @@ class Alluvial:
 
     def _create_collections(self):
         """TODO: write docstring."""
-        xlim = None
-        ylim = None
+        combined_x = []
         for diagram in self._diagrams:
             # TODO: Probably should not mess with the zorder, but at least
             # make it a property of Alluvial...
@@ -1975,15 +1980,30 @@ class Alluvial:
             defaults = self.get_defaults()
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **defaults)
+            combined_x.extend(diagram.get_x().tolist())
             _xmin, _ymin, _xmax, _ymax = diagram.get_datalim()
-            xlim = _update_1dlimits(xlim, _xmin, _xmax)
-            ylim = _update_1dlimits(ylim, _ymin, _ymax)
-        self.ax.set_xlim(*xlim)
-        self.ax.set_ylim(*ylim)
+            self._xlim = _update_1dlimits(self._xlim, _xmin, _xmax)
+            self._ylim = _update_1dlimits(self._ylim, _ymin, _ymax)
+
+    def _collect_x_positions(self):
+        """Get the x coordinates of the columns in all sub-diagrams."""
+        combined_x = []
+        for diagram in self._diagrams:
+            combined_x.extend(diagram.get_x().tolist())
+        return sorted(set(combined_x))
 
     def finish(self,):
         """Draw the Alluvial diagram."""
         self._create_collections()
+        # do some styling of the axes
+        # TODO: make this a function of the layout
+        self.ax.xaxis.set_ticks_position('bottom')
+        x_positions = self._collect_x_positions()
+        self.ax.xaxis.set_major_locator(
+            mticker.FixedLocator(x_positions, self.max_nbr_xticks - 1)
+        )
+        self.ax.set_xlim(*self._xlim)
+        self.ax.set_ylim(*self._ylim)
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd

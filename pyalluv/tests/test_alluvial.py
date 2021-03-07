@@ -178,6 +178,7 @@ class TestAlluvialStyling:
         # set common limits and axis styling
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
+        refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
 
     @check_figures_equal()
     def test_styling_hierarchy(self, fig_test, fig_ref):
@@ -227,3 +228,4 @@ class TestAlluvialStyling:
         tesax.set_xlim(-1, 4)
         refax.set_ylim(-1, 6)
         tesax.set_ylim(-1, 6)
+        refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())

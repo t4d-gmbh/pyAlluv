@@ -38,9 +38,8 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'arrays-fractionflows-extMissing']
 
 
-@pytest.mark.parametrize(
-    'flows, ext, fractionflow, layout, ref_columns', test_data, ids=test_ids
-)
+@pytest.mark.parametrize('flows, ext, fractionflow, layout, ref_columns',
+                         test_data, ids=test_ids)
 class TestAlluvialFlows:
     def test_simple_alluvial(self, ext, flows, fractionflow, layout,
                              ref_columns):
@@ -89,9 +88,8 @@ test_data = [
 test_ids = ['memberships-conversion', 'memberships-df-conversion']
 
 
-@pytest.mark.parametrize(
-    'memberships, ref_columns, ref_flows', test_data, ids=test_ids
-)
+@pytest.mark.parametrize('memberships, ref_columns, ref_flows', test_data,
+                         ids=test_ids)
 class TestAlluvialMemberships:
     def test_memberships_conversion(self, memberships, ref_columns, ref_flows):
         alluvial = Alluvial.from_memberships(memberships, width=0.3, layout='centered')
@@ -108,9 +106,8 @@ test_data = [
 test_ids = ['block-sorting']
 
 
-@pytest.mark.parametrize(
-    'flows, ext, fractf, layout, ref_columns', test_data, ids=test_ids
-)
+@pytest.mark.parametrize('flows, ext, fractf, layout, ref_columns', test_data,
+                         ids=test_ids)
 class TestAlluvialLayout:
     @pytest.mark.devtest
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
@@ -149,7 +146,6 @@ class TestAlluvialLayout:
 class TestAlluvialStyling:
     @check_figures_equal()
     def test_Block_styling(self, fig_test, fig_ref):
-        # dev-test
         # Check individual styling of Rectangles.
         style = dict(ec='green', lw=2, clip_on=True)
         # create the two figures
@@ -165,7 +161,7 @@ class TestAlluvialStyling:
         refax.add_collection(PatchCollection(pc, match_original=True, zorder=4))
         # ###
         # tesax
-        # draw an alluvial with 1 diagram 1 col and a single block on tesax
+        # draw an alluvial with 1 diagram 2 cols, 3 blocks and no flows
         alluvial = Alluvial(x=[0, 2], ax=tesax, width=1)
         diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
                                 **style)
@@ -224,8 +220,8 @@ class TestAlluvialStyling:
         # ###
 
         # set common limits and axis styling
-        refax.set_xlim(-1, 4)
         tesax.set_xlim(-1, 4)
-        refax.set_ylim(-1, 6)
         tesax.set_ylim(-1, 6)
+        refax.set_xlim(*tesax.get_xlim())
+        refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())

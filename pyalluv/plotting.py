@@ -1,11 +1,13 @@
 import logging
 import itertools
+from weakref import WeakValueDictionary
 import numpy as np
 import matplotlib as mpl
 from matplotlib.cbook import index_of
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
 from matplotlib import cbook
+# from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
 from matplotlib.artist import Artist
 # from matplotlib import transforms
 # from matplotlib import _api
@@ -90,7 +92,7 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
     return flowmatrix, ext
 
 
-def _update_1dlimits(limits, newmin, newmax):
+def _update_limits(limits, newmin, newmax):
     if limits is None:
         return newmin, newmax
     omin, omax = limits
@@ -111,13 +113,14 @@ class _ArtistProxy:
         """TODO: write docstring."""
         # TODO: not sure if stale is needed for this
         self.stale = True
-        self._tags = []
+        self._tags = []  # list of tag identifiers (label of a tag)
         self._artist = None
         self.set_styling(kwargs)
 
     def set_tags(self, tags: list):
         """Set a tag for the block."""
         self._tags = tags
+        # TODO: register to all tags!
 
     def get_tags(self):
         """Return the list of tags."""
@@ -126,11 +129,13 @@ class _ArtistProxy:
     def add_tag(self, tag):
         """Adding a new tag to the proxy."""
         if tag not in self._tags:
+            tag.register_proxy(self)
             self._tags.append(tag)
 
     def remove_tag(self, tag):
         """Removing a tag."""
         if tag in self._tags:
+            tag.deregister_proxy(self)
             self._tags.remove(tag)
 
     # TODO: not sure if needed
@@ -194,7 +199,7 @@ class _ArtistProxy:
         """Method handling properties foreign to the attached artist class."""
         pass
 
-    def _applicable_properties(self, props):
+    def _applicable_props(self, props):
         """TODO: write docstring."""
         applicable = dict()
         nonapp = dict()
@@ -218,7 +223,7 @@ class _ArtistProxy:
         """
         tagprops, nonapp_tagprops = dict(), dict()
         for tag in self._tags:
-            _tprops, _natporop = self._applicable_properties(tag.get_props())
+            _tprops, _natporop = self._applicable_props(tag.get_props(id(self)))
             _tprops = cbook.normalize_kwargs(_tprops, self._artistcls)
             tagprops.update(_tprops)
             nonapp_tagprops.update(_natporop)
@@ -235,7 +240,7 @@ class _ArtistProxy:
             _props.update(tagprops)
         # finally update with block specific styling
         _props.update(self._kwargs)
-        _props, _nonapp_props = self._applicable_properties(_props)
+        _props, _nonapp_props = self._applicable_props(_props)
         # combine the non-applicable properties from tags and proxy
         nonapp_props.update(_nonapp_props)
         self._pre_creation(ax, **nonapp_props)
@@ -304,6 +309,7 @@ class _Block(_ArtistProxy):
         super().__init__(label=label, **kwargs)
 
         self._height = height
+        self._width = None
         self._xa = xa
         self._ya = ya
         self._set_horizontalalignment(horizontalalignment)
@@ -325,9 +331,19 @@ class _Block(_ArtistProxy):
         """Return the y coordinate of the anchor point."""
         return self._ya
 
+    def get_xlim(self,):
+        """Returns the horizontal data limits as a tuple (x0, width)"""
+        return self.get_x(), self.get_width()
+
+    def get_ylim(self,):
+        """Returns the vertical data limits as a tuple (y0, height)"""
+        return self.get_y(), self.get_height()
+
     def get_datalim(self,):
         """Return the bounds (x0, y0, width, height) in data coordinates."""
-        return self.get_x(), self.get_y(), self.get_width(), self.get_height()
+        x0, width = self.get_xlim()
+        y0, height = self.get_ylim()
+        return x0, y0, width, height
 
     def get_bounds(self,):
         """Return the bounds (x0, y0, width, height) of `.Bbox`."""
@@ -342,7 +358,11 @@ class _Block(_ArtistProxy):
 
     def get_width(self):
         """Return the width of the block."""
-        return self._artist.get_width()
+        # TODO: this should be functionalized for other attributes
+        try:
+            return self._artist.get_width()
+        except AttributeError:
+            return self._width
 
     def get_anchor(self,):
         """Return the anchor point of the block."""
@@ -963,16 +983,91 @@ class Tag:
         label : str, optional
             The label of this collection.
         """
+        self._kwargs = dict(kwargs)
+        self._cmap = self._kwargs.pop('cmap', None)
+        self._cmap_data = kwargs.pop('cmap_array', None)
+        self._A = {}
+        # cm.ScalarMappable.__init__(self, norm, cmap)
         self.label = label
-        self._kwargs = kwargs
+        self._marked_obj = WeakValueDictionary()
+        self._closed = False
+    # # from collection
+    # def update_scalarmappable(self):
+    #     """Update colors from the scalar mappable array, if it is not None."""
+    #     if self._A is None:
+    #         return
+    #     # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
+    #     if self._A.ndim > 1 and not isinstance(self, QuadMesh):
+    #         raise ValueError('Collections can only map rank 1 arrays')
+    #     if not self._check_update("array"):
+    #         return
+    #     if np.iterable(self._alpha):
+    #         if self._alpha.size != self._A.size:
+    #             raise ValueError(f'Data array shape, {self._A.shape} '
+    #                              'is incompatible with alpha array shape, '
+    #                              f'{self._alpha.shape}. '
+    #                              'This can occur with the deprecated '
+    #                              'behavior of the "flat" shading option, '
+    #                              'in which a row and/or column of the data '
+    #                              'array is dropped.')
+    #         # pcolormesh, scatter, maybe others flatten their _A
+    #         self._alpha = self._alpha.reshape(self._A.shape)
 
-    def update(self, kw):
-        """TODO: write docstring."""
-        self._kwargs.update(kw)
+    #     if self._is_filled:
+    #         self._facecolors = self.to_rgba(self._A, self._alpha)
+    #     elif self._is_stroked:
+    #         self._edgecolors = self.to_rgba(self._A, self._alpha)
 
-    def get_props(self,):
+    def register_proxy(self, proxy):
         """TODO: write docstring."""
-        return self._kwargs
+        if self._closed:
+            # TODO: a closed tag can no longer be used to tag a proxy
+            raise Exception()
+        proxy_id = id(proxy)
+        if proxy_id in self._marked_obj:
+            # if the proxy was already registered, ignore it
+            return
+        # TODO: get the relevant value from the proxy
+        # self._kwargs.update(kw)
+        if self._cmap_data is not None:
+            self._A[proxy_id] = getattr(proxy, self._cmap_data)
+        # remember the proxy
+        self._marked_obj[proxy_id] = proxy
+
+    def deregister_proxy(self, proxy):
+        proxy_id = id(proxy)
+        self._marked_obj.pop(id(proxy))
+        self._A.pop(proxy_id)
+
+    def _prepare_props(self):
+        self._proxy_props = {}
+        if self._cmap:
+            # create norm
+            # map _A to color -> proxi_id to color/lw in self._proxy_props
+            for proxy_id in self._marked_obj:
+                proxy_prop = {}
+                # TODO: add facecolor
+                self._proxy_props[proxy_id] = proxy_prop
+
+    def close(self):
+        """This method closes the tag for registration."""
+        self._prepare_props()
+        self._closed = True
+
+    @property
+    def is_closed(self,):
+        return self._closed
+
+    def get_props(self, proxy_id):
+        """TODO: write docstring."""
+        if not self._closed:
+            self.close()
+        # props = cbook.normalize_kwargs(self._kwargs, proxy._artistcls)
+        # if self._cmap is not None:
+        #     fc = self._get_
+        props = dict(self._kwargs)
+        props.update(self._proxy_props.get(proxy_id, {}))
+        return props
 
 
 class SubDiagram:
@@ -1073,7 +1168,7 @@ class SubDiagram:
 
         # TODO: below attributes need to be handled
         self._redistribute_vertically = 4
-        self._ymin, self._ymax = None, None
+        self._ylim = None
 
         # TODO: update blockprops with kwargs? at least handle label
         self._blocks = _ProxyCollection(_blocks, label=label,
@@ -1106,42 +1201,59 @@ class SubDiagram:
         self.stale = True
 
     def __iter__(self):
-        if self.stale:
-            self.generate_layout()
-        return iter(self.get_columns())
+        return iter(self._columns)
 
     def __getitem__(self, key):
-        if self.stale:
-            self.generate_layout()
         return self._columns[key]
 
-    def get_datalim(self):
+    def _update_datalim(self):
         """Return the limits of the block collection in data units."""
-        if self.stale:
-            self.distribute_blocks()
         # TODO: set x margin (for now just 1%)
-        _xmargin = 0.01 * (max(self._x) - min(self._x))
+        xmin, xmax = min(self._x), max(self._x)
+        # setting some initial y limits
+        for _col in self._columns:
+            if _col:
+                y0, height = _col[0].get_ylim()
+                ymin, ymax = y0, y0 + height
+                break
+        # getting x limits
+        for _block in self._columns[0]:
+            x0, width = _block.get_xlim()
+            xmin = min(xmin, x0)
+        for _block in self._columns[-1]:
+            x0, width = _block.get_xlim()
+            xmax = max(xmax, x0 + width)
+        # getting y limits
+        for _col in self._columns:
+            if _col:
+                y0, height = _col[0].get_ylim()
+                ymin = min(ymin, y0)
+                y0, height = _col[-1].get_ylim()
+                ymax = max(ymax, y0 + height)
+        self._xlim = xmin, xmax
+        self._ylim = ymin, ymax
+
+    def get_blocks(self):
+        return self._blocks
+
+    def get_datalim(self,):
+        """Returns the limits in data units (x0, y0, x1, y1)."""
+        if self.stale:
+            self.generate_layout()
+        x0, x1 = self._xlim
+        y0, y1 = self._ylim
+        return x0, y0, x1, y1
+
+    def get_visuallim(self):
+        """Returns the data limit with sensible margins added."""
+        xmin, ymin, xmax, ymax = self.get_datalim()
+        # TODO: set x margin (for now just 1%)
+        xmargin = 0.01 * (max(self._x) - min(self._x))
         if self._hspace_combine == 'add':
-            _ymargin = self._hspace
+            ymargin = self._hspace
         else:
-            _ymargin = self._hspace / max(len(col) for col in self._columns)
-        x0, y0, width, height = self._columns[0][0].get_datalim()
-        xmin = x0 - _xmargin
-        ymin = y0 - _ymargin
-        if len(self._columns[0]) > 1:
-            for _block in self._columns[0][1:]:
-                x0, y0, width, height = _block.get_datalim()
-                xmin = min(xmin, x0 - _xmargin)
-                ymin = min(ymin, y0 - _ymargin)
-        x0, y0, width, height = self._columns[-1][0].get_datalim()
-        xmax = x0 + width + _xmargin
-        ymax = y0 + height + _ymargin
-        if len(self._columns[-1]) > 1:
-            for _block in self._columns[-1][1:]:
-                x0, y0, width, height = _block.get_datalim()
-                xmax = max(xmax, x0 + width + _xmargin)
-                ymax = max(ymax, y0 + height + _ymargin)
-        return xmin, ymin, xmax, ymax
+            ymargin = self._hspace / max(len(col) for col in self._columns)
+        return xmin - xmargin, ymin - ymargin, xmax + xmargin, ymax + ymargin
 
     def get_layout(self):
         """Get the layout of this diagram"""
@@ -1200,7 +1312,7 @@ class SubDiagram:
         """TODO: write docstring."""
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
-            self.distribute_blocks(col_id)
+            self._distribute_blocks(col_id)
         # TODO: move columns vert. to minimize vertical comp. flows attached
         self.stale = False
 
@@ -1228,16 +1340,20 @@ class SubDiagram:
             else:
                 return 0
 
-    def distribute_blocks(self, col_id):
+    def _distribute_blocks(self, col_id: int):
         """
         Distribute the blocks in a column.
 
         Parameters
         -----------
-        x_pos: float
-          The horizontal position at which the clusters should be distributed.
-          This must be a `key` of the :attr:`~.Alluvial.clusters`
-          attribute.
+        col_id: int
+            The index of the column to recompute the distribution of blocks.
+
+        Returns
+        -------
+        tuple
+            (y_min, y_max) of the column in data units
+
         """
         nbr_blocks = len(self._columns[col_id])
         layout = self.get_column_layout(col_id)
@@ -1273,18 +1389,16 @@ class SubDiagram:
                     # self._pairwise_swapping(col_id)
                     raise NotImplementedError("The optimized layout is not yet"
                                               " implemented")
-            # TODO: bad implementation, avoid duplicated get_y call
-            _min_y = min(self._columns[col_id],
-                         key=lambda x: x.get_y()).get_y() - 2 * col_hspace
-            _max_y_cluster = max(self._columns[col_id],
-                                 key=lambda x: x.get_y() + x.get_height())
-            _max_y = _max_y_cluster.get_y() + \
-                _max_y_cluster.get_height() + 2 * col_hspace
-            self._ymin = min(self._ymin,
-                             _min_y) if self._ymin is not None else _min_y
-            self._ymax = max(self._ymax,
-                             _max_y) if self._ymax is not None else _max_y
-        self.stale = False
+            # _min_y = min(self._columns[col_id],
+            #              key=lambda x: x.get_y()).get_y() - 2 * col_hspace
+            # _max_y_cluster = max(self._columns[col_id],
+            #                      key=lambda x: x.get_y() + x.get_height())
+            # _max_y = _max_y_cluster.get_y() + \
+            #     _max_y_cluster.get_height() + 2 * col_hspace
+            # self._ymin = min(self._ymin,
+            #                  _min_y) if self._ymin is not None else _min_y
+            # self._ymax = max(self._ymax,
+            #                  _max_y) if self._ymax is not None else _max_y
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
@@ -1469,6 +1583,8 @@ class SubDiagram:
         _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
         self._flows.create_artist(ax=ax, **_flowkws)
         self._flows.add_artist_to_axes(ax)
+        # at last make sure the datalimits are updated
+        self._update_datalim()
 
 
 class Alluvial:
@@ -1981,9 +2097,9 @@ class Alluvial:
             diagram.create_artists(ax=self.ax, zorder=diag_zorder,
                                    **defaults)
             combined_x.extend(diagram.get_x().tolist())
-            _xmin, _ymin, _xmax, _ymax = diagram.get_datalim()
-            self._xlim = _update_1dlimits(self._xlim, _xmin, _xmax)
-            self._ylim = _update_1dlimits(self._ylim, _ymin, _ymax)
+            _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
+            self._xlim = _update_limits(self._xlim, _xmin, _xmax)
+            self._ylim = _update_limits(self._ylim, _ymin, _ymax)
 
     def _collect_x_positions(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
@@ -2046,10 +2162,12 @@ class Alluvial:
         """
         if isinstance(tag, str):
             tag = self._tags[tag]
-        # Note: there is really no point in tagging an entire subd
+        if tag.is_closed:
+            # TODO: add some info to why this tag might be closed
+            raise Exception('A closed tag cannot be used on tag blocks')
         nbr_args = len(args)
-
         # convert all input to slices
+        
         def _to_slice(arg):
             if isinstance(arg, int):
                 return slice(arg, arg + 1)

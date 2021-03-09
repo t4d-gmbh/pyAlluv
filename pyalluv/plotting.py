@@ -1,12 +1,13 @@
 import logging
 import itertools
+from collections import defaultdict
 from weakref import WeakValueDictionary
 import numpy as np
 import matplotlib as mpl
 from matplotlib.cbook import index_of
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
-from matplotlib import cbook
+from matplotlib import cbook, cm
 # from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
 from matplotlib.artist import Artist
 # from matplotlib import transforms
@@ -237,10 +238,13 @@ class _ArtistProxy:
         if self.is_tagged:
             # TODO: gather all properties from its tag
             tagprops, nonapp_props = self._from_tags()
+            print('from tags props', tagprops, nonapp_props)
             _props.update(tagprops)
         # finally update with block specific styling
         _props.update(self._kwargs)
+        print('after self kwargs', _props)
         _props, _nonapp_props = self._applicable_props(_props)
+        print('then applicable', _props)
         # combine the non-applicable properties from tags and proxy
         nonapp_props.update(_nonapp_props)
         self._pre_creation(ax, **nonapp_props)
@@ -503,6 +507,7 @@ class _Block(_ArtistProxy):
 
     def _create_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
+        print('creating a block', kwargs)
         self._artist = self._artistcls(self.get_xy(), height=self._height,
                                        axes=ax, **kwargs)
 
@@ -888,7 +893,7 @@ class _ProxyCollection(_ArtistProxy):
     """
     _artistcls = PatchCollection
     _singular_props = ['zorder', 'hatch', 'pickradius', 'capstyle',
-                       'joinstyle']
+                       'joinstyle', 'cmap', 'norm']
 
     def __init__(self, proxies, label=None, **kwargs):
         """
@@ -901,7 +906,7 @@ class _ProxyCollection(_ArtistProxy):
         """
         # TODO: cmap does not work with datetime as x axis yet...
         # get cmap data:
-        self._cmap_data = kwargs.pop('cmap_array', None)
+        self._cmap_data = kwargs.pop('mappable', None)
         if self._cmap_data is not None:
             # TODO: allow either a block property, x, or custom array
             self._cmap_data = 'x'
@@ -952,6 +957,8 @@ class _ProxyCollection(_ArtistProxy):
             match_original = True
         if match_original:
             kwargs = self.to_element_styling(kwargs)
+        print('matching orig', match_original)
+        print('collection kwargs', kwargs)
         # TODO: does this work with 'interpolate'?
         self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
@@ -960,7 +967,7 @@ class _ProxyCollection(_ArtistProxy):
         )
         if self._cmap_data is not None:
             self._artist.set_array(
-                np.asarray([getattr(proxy, self._cmap_data)
+                np.asarray([getattr(proxy, f'get_{self._cmap_data}')()
                             for proxy in self._proxies]))
 
     def add_artist_to_axes(self, ax):
@@ -972,51 +979,69 @@ class _ProxyCollection(_ArtistProxy):
         self._proxies.append(proxy)
 
 
-class Tag:
+class _Tag(cm.ScalarMappable):
     """
     A collection of `Blocks`
     """
-    def __init__(self, label=None, **kwargs):
+    def __init__(self, **kwargs):
         """
         Parameters
         ----------
-        label : str, optional
-            The label of this collection.
         """
-        self._kwargs = dict(kwargs)
-        self._cmap = self._kwargs.pop('cmap', None)
-        self._cmap_data = kwargs.pop('cmap_array', None)
-        self._A = {}
         # cm.ScalarMappable.__init__(self, norm, cmap)
-        self.label = label
-        self._marked_obj = WeakValueDictionary()
-        self._closed = False
-    # # from collection
-    # def update_scalarmappable(self):
-    #     """Update colors from the scalar mappable array, if it is not None."""
-    #     if self._A is None:
-    #         return
-    #     # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
-    #     if self._A.ndim > 1 and not isinstance(self, QuadMesh):
-    #         raise ValueError('Collections can only map rank 1 arrays')
-    #     if not self._check_update("array"):
-    #         return
-    #     if np.iterable(self._alpha):
-    #         if self._alpha.size != self._A.size:
-    #             raise ValueError(f'Data array shape, {self._A.shape} '
-    #                              'is incompatible with alpha array shape, '
-    #                              f'{self._alpha.shape}. '
-    #                              'This can occur with the deprecated '
-    #                              'behavior of the "flat" shading option, '
-    #                              'in which a row and/or column of the data '
-    #                              'array is dropped.')
-    #         # pcolormesh, scatter, maybe others flatten their _A
-    #         self._alpha = self._alpha.reshape(self._A.shape)
 
-    #     if self._is_filled:
-    #         self._facecolors = self.to_rgba(self._A, self._alpha)
-    #     elif self._is_stroked:
-    #         self._edgecolors = self.to_rgba(self._A, self._alpha)
+        super().__init__()
+        self._marked_obj = WeakValueDictionary()
+        self._is_filled = True   # By default both facecolor and edgecolor will
+        self._is_stroked = True  # be set by a tag.
+        self._alpha = None
+        self._mappable = None
+        self._mappables = dict()
+        if kwargs:
+            _kwargs = dict(kwargs)
+            self._label = _kwargs.pop('label', None)
+            self.style(**_kwargs)
+        self._closed = False
+
+    # from collection
+    def update_scalarmappable(self):
+        """Update colors from the scalar mappable array, if it is not None."""
+        marked_obj_ids = list(self._marked_obj.keys())
+        print('oids', marked_obj_ids)
+        self._proxy_props = {oid: {} for oid in marked_obj_ids}
+        self.set_array(np.array(
+            [getattr(self._marked_obj[oid], f'get_{self._mappable}')()
+             for oid in marked_obj_ids]
+        ))
+        print('\n\t', self._A)
+        if self._A is None:
+            return
+        # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
+        if self._A.ndim > 1:
+            raise ValueError('Collections can only map rank 1 arrays')
+        if not self._check_update("array"):
+            return
+        if np.iterable(self._alpha):
+            if self._alpha.size != self._A.size:
+                raise ValueError(f'Data array shape, {self._A.shape} '
+                                 'is incompatible with alpha array shape, '
+                                 f'{self._alpha.shape}. '
+                                 'This can occur with the deprecated '
+                                 'behavior of the "flat" shading option, '
+                                 'in which a row and/or column of the data '
+                                 'array is dropped.')
+            # pcolormesh, scatter, maybe others flatten their _A
+            self._alpha = self._alpha.reshape(self._A.shape)
+
+        _colors = self.to_rgba(self._A, self._alpha)
+        if self._is_filled:
+            # self._facecolors = self.to_rgba(self._A, self._alpha)
+            for i, oid in enumerate(marked_obj_ids):
+                self._proxy_props[oid]['facecolor'] = _colors[i]
+        elif self._is_stroked:
+            # self._edgecolors = self.to_rgba(self._A, self._alpha)
+            for i, oid in enumerate(marked_obj_ids):
+                self._proxy_props[oid]['edgecolor'] = _colors[i]
 
     def register_proxy(self, proxy):
         """TODO: write docstring."""
@@ -1029,8 +1054,8 @@ class Tag:
             return
         # TODO: get the relevant value from the proxy
         # self._kwargs.update(kw)
-        if self._cmap_data is not None:
-            self._A[proxy_id] = getattr(proxy, self._cmap_data)
+        if self._mappable is not None:
+            self._mappables[proxy_id] = getattr(proxy, f'get_{self._mappable}')()
         # remember the proxy
         self._marked_obj[proxy_id] = proxy
 
@@ -1041,13 +1066,34 @@ class Tag:
 
     def _prepare_props(self):
         self._proxy_props = {}
-        if self._cmap:
-            # create norm
-            # map _A to color -> proxi_id to color/lw in self._proxy_props
-            for proxy_id in self._marked_obj:
-                proxy_prop = {}
-                # TODO: add facecolor
-                self._proxy_props[proxy_id] = proxy_prop
+        if self._mappable is not None:
+            self.update_scalarmappable()
+
+    # TODO: unfinished (not updated)
+    # TODO: uncomment once in mpl
+    # @docstring.dedent_interpd
+    def style(self, **props):
+        """
+        Setting the styling properties associated to this tag.
+
+        Allowed are styling arguments of :class:`matplotlib.patches.PathPatch`
+        (see below), as well as, *cmap* and *mappable*.
+
+        Parameters:
+        -----------
+        cmap : `~.colors.Colormap`, optional
+            Forwarded to `.ScalarMappable`. The default of
+            ``None`` will result in :rc:`image.cmap` being used.
+
+          %(Patch_kwdoc)s
+
+        """
+        props = dict(props)
+        self.set_cmap(props.pop('cmap', None))
+        self.set_norm(props.pop('norm', None))
+        # TODO: set a global default for the mappable
+        self._mappable = props.pop('mappable', None)
+        self._props = props
 
     def close(self):
         """This method closes the tag for registration."""
@@ -1062,10 +1108,10 @@ class Tag:
         """TODO: write docstring."""
         if not self._closed:
             self.close()
-        # props = cbook.normalize_kwargs(self._kwargs, proxy._artistcls)
-        # if self._cmap is not None:
+        # props = cbook.normalize_kwargs(self._props, proxy._artistcls)
+        # if self.cmap is not None:
         #     fc = self._get_
-        props = dict(self._kwargs)
+        props = dict(self._props)
         props.update(self._proxy_props.get(proxy_id, {}))
         return props
 
@@ -1142,6 +1188,8 @@ class SubDiagram:
         # Note: both _block-/_flowprops must be normalized already
         self._blockprops = blockprops or dict()
         self._flowprops = flowprops or dict()
+        # props in kwargs, however, not necessarily
+        self._distribute_kwargs(kwargs)
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1170,10 +1218,8 @@ class SubDiagram:
         self._redistribute_vertically = 4
         self._ylim = None
 
-        # TODO: update blockprops with kwargs? at least handle label
         self._blocks = _ProxyCollection(_blocks, label=label,
                                         **self._blockprops)
-
         # create the Flows is only based on *flows* and *extout*'s
         _flows = []
         # connect source and target:
@@ -1196,8 +1242,6 @@ class SubDiagram:
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
         self._label_margin = label_margin
-        self._kwargs = cbook.normalize_kwargs(kwargs,
-                                              _ProxyCollection._artistcls)
         self.stale = True
 
     def __iter__(self):
@@ -1554,6 +1598,19 @@ class SubDiagram:
         else:
             return False
 
+    def _distribute_kwargs(self, kwargs):
+        """Check for block/flow specific kwargs and move them to block-/flowprops"""
+        _kwargs = cbook.normalize_kwargs(kwargs,
+                                         _ProxyCollection._artistcls)
+        cmap = _kwargs.pop('cmap', None)
+        if cmap is not None:
+            if self._blockprops.get('cmap', None) is None:
+                self._blockprops.update(
+                    dict(cmap=cmap, norm=_kwargs.pop('norm', None),
+                         mappable=_kwargs.pop('mappable', None))
+                )
+        self._kwargs = _kwargs
+
     # TODO: is this still needed? if yes, automate or use _singular_props
     @classmethod
     def separate_kwargs(cls, kwargs):
@@ -1561,7 +1618,7 @@ class SubDiagram:
         sdkwargs, other_kwargs = dict(), dict()
         sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
                    'hspace_combine', 'label_margin', 'cmap', 'norm',
-                   'cmap_array', 'blockprops', 'flowprops']
+                   'mappable', 'blockprops', 'flowprops']
         for k, v in kwargs.items():
             if k in sd_args:
                 sdkwargs[k] = v
@@ -1699,7 +1756,7 @@ class Alluvial:
         self._original_blockprops = blockprops
         self._original_flowprops = flowprops
         self._diagrams = []
-        self._tags = dict()
+        self._tags = defaultdict(_Tag)
         self._extouts = []
         self._diagc = 0
         self._dlabels = []
@@ -1723,18 +1780,20 @@ class Alluvial:
             # TODO: kw separation should be a method of SubDiagram entirely
             flows = _kwargs.pop('flows', None)
             ext = _kwargs.pop('ext', None)
-            label = _kwargs.pop('label', '')
-            fractionflow = _kwargs.pop('fractionflow', False)
-            tags = _kwargs.pop('tags', None)
-            # draw a diagram if *flows* are provided
-            sdkw, self._defaults = SubDiagram.separate_kwargs(_kwargs)
             # ###
             if flows is not None or ext is not None:
+                label = _kwargs.pop('label', '')
+                fractionflow = _kwargs.pop('fractionflow', False)
+                tags = _kwargs.pop('tags', None)
+                # draw a diagram if *flows* are provided
+                sdkw, self._defaults = SubDiagram.separate_kwargs(_kwargs)
                 self.add(flows=flows, ext=ext, extout=None, x=self._x,
                          label=label, yoff=0,
                          fractionflow=fractionflow, tags=tags,
                          **sdkw)
                 self.finish()
+            else:
+                self._defaults = _kwargs
 
     def get_x(self):
         """Return the sequence of x coordinates of the Alluvial diagram"""
@@ -1888,8 +1947,17 @@ class Alluvial:
         """TODO: write docstring."""
         # TODO: handle tags: not actually tags, but str to define ensembles
         # like 'columns', 'index', etc. might also get rid of this.
-        _kwargs = cbook.normalize_kwargs(kwargs,
-                                         _ProxyCollection._artistcls)
+
+        # Note: here the defaults from alluvial are passed to the new
+        # subdiagram (is relevant for those for the proxies, like layout)
+        # defaults are actually passed once again when calling
+        # _create_collection. It would be better to separated proxy specific
+        # (actually specific to SubDiagram) form artist specific keywords and
+        # pass the proxy specific here and the artist specific in
+        # _create_collection
+        _kwargs = dict(self._defaults)
+        _kwargs.update(cbook.normalize_kwargs(kwargs,
+                                              _ProxyCollection._artistcls))
         _blockprops = _kwargs.pop('blockprops', self._blockprops)
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
@@ -2151,26 +2219,63 @@ class Alluvial:
                 "if you want to change the styling of an existing tag."
             )
             return None
-        self._tags[label] = Tag(label=label, **kwargs)
+        # self._tags[label] = _Tag(label=label, **kwargs)
+        self._tags[label].style(**kwargs)
         return self._tags[label]
 
-    def tag_blocks(self, tag, *args):
+    def select_by_label(self, label):
         """
-        Tagging a selection of blocks.
+        Returns a selection of blocks based on a provided label.
 
-        TODO: description of selection procedure passing slices to args.
+        Parameters
+        ----------
+        label : str
+            The label of a subdiagram, tag or block. All blocks associated to
+            this label will be returned.
+
+        Note that this method always returns a selection of blocks. This is
+        also the case if the label of a subdiagram or tag is provided.
         """
-        if isinstance(tag, str):
-            tag = self._tags[tag]
-        if tag.is_closed:
-            # TODO: add some info to why this tag might be closed
-            raise Exception('A closed tag cannot be used on tag blocks')
+        raise NotImplementedError('To be implemented')
+
+    def select_blocks(self, *args):
+        """
+        Returns a selection of blocks across sub-diagrams and columns.
+
+        Call signature::
+
+            select_blocks([subd_slice], [column_slice], block_slice)
+
+        Each selector, *subd_slice*, *column_slice* and *block_slice* can be a
+        single index, a :obj:`slice` or *None*. If a selector is set to *None*
+        all elements for this selector will be chosen. Some examples are shown
+        below.
+
+        >>> alluv = Alluvial()
+        >>> alluv = alluv.add(flows=None, ext=[[1, 2, 3], [2, 3, 1]],
+                              layout='bottom')
+        >>> alluv = alluv.add(flows=None, ext=[[4, 2, 3], [1, 2, 3]],
+                              layout='top')
+        >>> alluv.select_blocks(0, None, 0)        # from the 1st subdiagram
+        >>>                                        # get the first block in all
+        >>>                                        # columns.
+        >>> alluv.select_blocks(1, 0, slice(0, 2)) # from the 2nd subdiagram
+        >>>                                        # get the first two blocks
+        >>>                                        # in the 1st columns.
+
+        Note that the ordering of blocks in a column is determined by the
+        layout. As a consequence `alluv.select_blocks(None, None, 0)` will
+        select the block largest block in all columns of all subdiagrams if the
+        layout is `'bottom'` and the smallest block in case of `'top'`.
+        Therefore, `select_blocks` might be difficult to use on columns with
+        the layouts `'centered'` and `'optimized'`.
+        """
         nbr_args = len(args)
         # convert all input to slices
-        
+
         def _to_slice(arg):
             if isinstance(arg, int):
-                return slice(arg, arg + 1)
+                return slice(arg, arg + 1 if arg != -1 else None)
             elif isinstance(arg, slice):
                 return arg
             elif arg is None:
@@ -2178,6 +2283,7 @@ class Alluvial:
             else:
                 return slice(*arg)
         args = [_to_slice(arg) for arg in args]
+        blocks = []
         if nbr_args == 1:
             _subdselect = slice(None, None)
             _colselect = slice(None, None)
@@ -2192,19 +2298,47 @@ class Alluvial:
             _bselect = args[2]
         for diagram in self._diagrams[_subdselect]:
             for col in diagram[_colselect]:
-                for block in col[_bselect]:
-                    block.add_tag(tag)
+                blocks.extend(col[_bselect])
+        return blocks
 
-    def update_tag(self, label, **kwargs):
-        """TODO: write docstring."""
-        if label not in self._tags:
-            _log.warning(
-                f"The tag '{label}' is not registered.You must"
-                " register it first with *register_tag*."
-            )
-            return None
-        tag = self._tags[label]
-        tag.update(kwargs)
+    def tag_blocks(self, tag, *args):
+        """
+        Tagging a selection of blocks.
+
+        Parameters
+        ----------
+        tag : str or `._Tag`
+            Identification of a tag. This can either be a tag label or directly
+            a `._Tag` object.
+        args :
+
+        TODO: description of selection procedure passing slices to args.
+        """
+        if isinstance(tag, str):
+            tag = self._tags[tag]  # this creates a new tag if it did not exist
+        if tag.is_closed:
+            # TODO: add some info to why this tag might be closed
+            raise Exception('A closed tag cannot be used on tag blocks')
+        blocks = self.select_blocks(*args)
+        for block in blocks:
+            block.add_tag(tag)
+
+    def style_tag(self, label, **props):
+        """TODO: write docstring.
+        Note that when attached to a block, the styling of a tag overwrites the
+        styling defined in the sub-diagram the block belongs to. One exception
+        is if the sub-diagram has a colormap defined. In this case the
+        facecolor or colormap of a tag will be ignored on all tagged blocks of
+        this sub-diagram. This is because a PatchCollection re-sets the
+        facecolor at drawing time if a colormap is provided.
+        """
+        # if label not in self._tags:
+        #     _log.warning(
+        #         f"The tag '{label}' is not registered. You must"
+        #         " register it first with *register_tag*."
+        #     )
+        #     return None
+        self._tags[label].style(props)
 
 
 # TODO: legend handler for subdiagram and for alluvial diagram

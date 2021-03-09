@@ -4,6 +4,7 @@ from pyalluv import Alluvial
 from matplotlib.testing.decorators import check_figures_equal
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
+from matplotlib import pyplot as plt
 import pandas as pd
 
 
@@ -126,7 +127,6 @@ class TestAlluvialLayout:
     def test_yoff(self, flows, ext, fractf, layout, ref_columns):
         raise NotImplementedError()
         from pyalluv import Alluvial
-        from matplotlib import pyplot as plt
         a = Alluvial.from_memberships(
             [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
             width=0.2, hspace_combine='divide'
@@ -175,6 +175,7 @@ class TestAlluvialStyling:
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        plt.close('all')
 
     @check_figures_equal()
     def test_styling_hierarchy(self, fig_test, fig_ref):
@@ -225,3 +226,53 @@ class TestAlluvialStyling:
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        plt.close('all')
+
+    @check_figures_equal()
+    def test_cmap_usage(self, fig_test, fig_ref):
+        # dev-test
+        # Test the usage of colormaps for subdiagrams and tags
+        from matplotlib import cm
+        reds = cm.get_cmap("Reds")
+        blues = cm.get_cmap("Blues")
+        # first convert list of colors to get colors for ref_figure
+        nbr_blocks = 3  # will use 3 blocks
+        reds_l = reds(np.linspace(0, 1, nbr_blocks))
+        blues_l = blues(np.linspace(0, 1, nbr_blocks))
+        print('reds', reds_l)
+        print('blues', blues_l)
+        style = dict(ec='black', lw=2, width=1)
+        yoff = 4
+        # ###
+        # refax
+        refax = fig_ref.subplots()
+        pc = []
+        # draw 6 Recangles 3 top ones with 'Blues', 3 bottom ones with 'Reds'
+        x = [0, 2, 4, 0, 2, 4]
+        heights = [1, 2, 1, 3, 3, 2]
+        yoff = [4, 4, 3, 0, 0, 0]
+        c_l = np.vstack((blues_l, reds_l))
+        for i in range(6):
+            pc.append(Rectangle((x[i], yoff[i]), height=heights[i], fc=c_l[i],
+                                **style))
+        refax.add_collection(PatchCollection(pc, match_original=True))
+        # TODO: separate test for cmap on sub-diagram and cmap on tag
+        # ###
+        # texax
+        tesax = fig_test.subplots()
+        alluv = Alluvial(x=x[:3], ax=tesax, layout='bottom')
+        alluv.add(flows=None, ext=[*zip(heights[:3], heights[3:])], cmap=blues,
+                  mappable='x', **style)
+        # create a tag for the reds
+        alluv.register_tag('tag0', cmap=reds, mappable='x')
+        # alluv.register_tag('tag0')
+        alluv.tag_blocks('tag0', 0, None, -1)  # get top block in all cols
+        alluv.finish()
+        # ###
+        # set common limits and axis styling
+        tesax.set_xlim(-1, 6)
+        tesax.set_ylim(-1, 7)
+        refax.set_xlim(*tesax.get_xlim())
+        refax.set_ylim(*tesax.get_ylim())
+        refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        plt.close('all')

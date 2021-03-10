@@ -233,6 +233,7 @@ class TestAlluvialStyling:
         # dev-test
         # Test the usage of colormaps for subdiagrams and tags
         from matplotlib import cm
+        single_c = 'yellow'
         reds = cm.get_cmap("Reds")
         blues = cm.get_cmap("Blues")
         # first convert list of colors to get colors for ref_figure
@@ -248,30 +249,31 @@ class TestAlluvialStyling:
         refax = fig_ref.subplots()
         pc = []
         # draw 6 Recangles 3 top ones with 'Blues', 3 bottom ones with 'Reds'
-        x = [0, 2, 4, 0, 2, 4]
-        heights = [1, 2, 1, 3, 3, 2]
-        yoff = [4, 4, 3, 0, 0, 0]
-        c_l = np.vstack((blues_l, reds_l))
-        for i in range(6):
-            pc.append(Rectangle((x[i], yoff[i]), height=heights[i], fc=c_l[i],
+        x = [0, 2, 4]
+        _x = 3 * x
+        heights = [1, 2, 1, 3, 3, 2, 1, 1, 1]
+        yoff = [4, 4, 3, 0, 0, 0, 7, 7, 7]
+        c_l = list(blues_l) + 3 * [single_c] + list(reds_l)
+        for i in range(9):
+            pc.append(Rectangle((_x[i], yoff[i]), height=heights[i], fc=c_l[i],
                                 **style))
         refax.add_collection(PatchCollection(pc, match_original=True))
         # TODO: separate test for cmap on sub-diagram and cmap on tag
         # ###
         # texax
         tesax = fig_test.subplots()
-        alluv = Alluvial(x=x[:3], ax=tesax, layout='bottom')
-        alluv.add(flows=None, ext=[*zip(heights[:3], heights[3:])], cmap=blues,
-                  mappable='x', **style)
+        alluv = Alluvial(x=x, ax=tesax, layout='bottom', **style)
+        alluv.add(flows=None, ext=[*zip(heights[:3], heights[3:6])],
+                  fc=single_c, **style)
         # create a tag for the reds
-        alluv.register_tag('tag0', cmap=reds, mappable='x')
+        alluv.register_tag('tag0', cmap=blues, mappable='x')
         # alluv.register_tag('tag0')
         alluv.tag_blocks('tag0', 0, None, -1)  # get top block in all cols
+        alluv.add(flows=None, ext=[*zip(heights[6:])], cmap=reds,
+                  mappable='x', yoff=7, **style)
         alluv.finish()
         # ###
         # set common limits and axis styling
-        tesax.set_xlim(-1, 6)
-        tesax.set_ylim(-1, 7)
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())

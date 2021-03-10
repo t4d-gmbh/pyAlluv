@@ -1242,7 +1242,7 @@ class SubDiagram:
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
         self._label_margin = label_margin
-        self.stale = True
+        self.generate_layout()
 
     def __iter__(self):
         return iter(self._columns)

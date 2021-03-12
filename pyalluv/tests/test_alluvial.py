@@ -234,10 +234,13 @@ class TestAlluvialStyling:
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
         plt.close('all')
 
-    @check_figures_equal()
+    @check_figures_equal(extensions=('pdf',))
     def test_cmap_usage(self, fig_test, fig_ref):
         # dev-test
-        # Test the usage of colormaps for subdiagrams and tags
+        # Tests:
+        # - usage of colormaps for subdiagrams and tags
+        # - using datetime on x axis
+        from datetime import datetime, timedelta
         from matplotlib import cm
         single_c = 'yellow'
         reds = cm.get_cmap("Reds")
@@ -248,22 +251,23 @@ class TestAlluvialStyling:
         blues_l = blues(np.linspace(0, 1, nbr_blocks))
         print('reds', reds_l)
         print('blues', blues_l)
-        style = dict(ec='black', lw=2, width=1)
+        style = dict(ec='black', lw=2, width=timedelta(days=1))
         yoff = 4
         # ###
         # refax
         refax = fig_ref.subplots()
-        pc = []
         # draw 6 Recangles 3 top ones with 'Blues', 3 bottom ones with 'Reds'
-        x = [0, 2, 4]
+        # x = [0, 2, 4]
+        x = [datetime(2020, 1, 1), datetime(2020, 1, 3), datetime(2020, 1, 5)]
         _x = 3 * x
         heights = [1, 2, 1, 3, 3, 2, 1, 1, 1]
         yoff = [4, 4, 3, 0, 0, 0, 7, 7, 7]
         c_l = list(blues_l) + 3 * [single_c] + list(reds_l)
         for i in range(9):
-            pc.append(Rectangle((_x[i], yoff[i]), height=heights[i], fc=c_l[i],
-                                **style))
-        refax.add_collection(PatchCollection(pc, match_original=True))
+            refax.add_patch(Rectangle((_x[i], yoff[i]), height=heights[i],
+                                      fc=c_l[i], **style))
+            # refax.add_collection(PatchCollection(pc, match_original=True))
+
         # TODO: separate test for cmap on sub-diagram and cmap on tag
         # ###
         # texax
@@ -283,4 +287,5 @@ class TestAlluvialStyling:
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        refax.xaxis.set_major_formatter(tesax.xaxis.get_major_formatter())
         plt.close('all')

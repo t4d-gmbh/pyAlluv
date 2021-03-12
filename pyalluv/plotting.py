@@ -1,3 +1,5 @@
+import functools
+import inspect
 import logging
 import itertools
 from collections import defaultdict
@@ -7,7 +9,7 @@ import matplotlib as mpl
 from matplotlib.cbook import index_of
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
-from matplotlib import cbook, cm
+from matplotlib import _api, cbook, cm
 # from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
 from matplotlib.artist import Artist
 # from matplotlib import transforms
@@ -30,6 +32,7 @@ __author__ = 'Jonas I. Liechti'
 
 # TODO: check if cbook has something for this
 def _to_valid_arrays(data, attribute, dtype=np.float64):
+    """TODO: write docstring"""
     if data is None:
         return None
     if hasattr(data, 'index') and hasattr(data, 'values'):
@@ -59,6 +62,7 @@ def _to_valid_arrays(data, attribute, dtype=np.float64):
 
 
 def _memship_to_column(membership, absentval=None):
+    """TODO: write docstring"""
     if absentval in (None, np.nan):
         _mask = ~np.isnan(membership)
     else:
@@ -75,6 +79,7 @@ def _memship_to_column(membership, absentval=None):
 
 def _between_memships_flow(flow_dims, membership_last, membership_next,
                            absentval=None):
+    """TODO: write docstring"""
     ext = np.zeros(flow_dims[0])
     flowmatrix = np.zeros(flow_dims, dtype=int)
     for m1, m2 in zip(membership_last.astype(int),
@@ -94,10 +99,124 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
 
 
 def _update_limits(limits, newmin, newmax):
+    """TODO: write docstring"""
     if limits is None:
         return newmin, newmax
     omin, omax = limits
     return min(omin, newmin), max(omax, newmax)
+
+
+def _normalize_selector(selector):
+    """TODO: write docstring"""
+    nbr_args = len(selector)
+    # convert all input to slices
+
+    def _to_slice(arg):
+        if isinstance(arg, int):
+            return slice(arg, arg + 1 if arg != -1 else None)
+        elif isinstance(arg, slice):
+            return arg
+        elif arg is None:
+            return slice(None, None)
+        else:
+            return slice(*arg)
+    selector = [_to_slice(arg) for arg in selector]
+    if nbr_args == 1:
+        _subdselect = slice(None, None)
+        _colselect = slice(None, None)
+        _bselect = selector[0]
+    elif nbr_args == 2:
+        _subdselect = slice(None, None)
+        _colselect = selector[0]
+        _bselect = selector[1]
+    elif nbr_args == 3:
+        _subdselect = selector[0]
+        _colselect = selector[1]
+        _bselect = selector[2]
+    return _subdselect, _colselect, _bselect
+
+
+def to_canonical(alias_mapping=None):
+    """Returns the canonical name of *name* based on *alias_mapping*"""
+    # NOTE: this is simply a part of cbook.normalize_kwargs and could be
+    # moved and used in cbook directly
+    if alias_mapping is None:
+        alias_mapping = dict()
+    elif (isinstance(alias_mapping, type) and issubclass(alias_mapping, Artist)
+          or isinstance(alias_mapping, Artist)):
+        alias_mapping = getattr(alias_mapping, "_alias_map", {})
+
+    _to_canonical = {alias: canonical
+                     for canonical, alias_list in alias_mapping.items()
+                     for alias in alias_list}
+
+    def _get(name):
+        return _to_canonical.get(name, name)
+    return _get
+
+
+def _expose_artist_getters_and_setters(cls):
+    """
+    Wrapper that exposes all setters and getters from a subclass of Artist in
+    order to create a functional proxy class.
+    """
+    def make_proxy_getter(name):  # Enforce a closure over *name*.
+        @functools.wraps(getattr(cls._artistcls, name))
+        def method(self, *args, **kwargs):
+            if self._artist is not None:
+                return getattr(self._artist, name)(*args, **kwargs)
+            else:
+                # in principle we could return the attribute.
+                # However, since getters and setters for layout relevant
+                # properties need to be redefined in the particular proxy
+                # class, an Error is raised here.
+                # return self._kwargs.get(aname.replace("get_", ""), None)
+                raise NotImplementedError(f"{cls} has no implementation"
+                                          f" for '{name}', thus accessing"
+                                          f" the property '{name[4:]}' is"
+                                          " allowed only after the artist"
+                                          " is initiated.")
+        return method
+
+    def make_proxy_setter(name):  # Enforce a closure over *name*.
+        @functools.wraps(getattr(cls._artistcls, name))
+        def method(self, *args, **kwargs):
+            prop = cls.to_canonical(name.replace("set_", ""))
+            if prop in ('facecolor', 'edgecolor', 'linewidth', 'linestyle',
+                        'antialiased'):
+                self._is_styled = True  # set a flag for individual styling
+                setattr(self, f'own_{prop}', True)  # flag what is styled
+
+            if self._artist is not None:
+                return getattr(self._artist, name)(*args, **kwargs)
+            else:
+                # only store canonical names
+                self._kwargs[prop] = (args, kwargs)
+        return method
+
+    # get the getters and setters from _artist
+    artistcls_fcts = vars(cls._artistcls)
+    with _api.suppress_matplotlib_deprecation_warning():
+        artistcls_fcts = inspect.getmembers(cls._artistcls,
+                                            predicate=inspect.isfunction)
+    for aname, attribute in artistcls_fcts:
+        # the getters
+        if aname.startswith("get_") and callable(attribute) \
+                and not hasattr(cls, aname):
+            method = make_proxy_getter(aname)
+            method.__name__ = aname
+            method.__doc__ = "Proxy method for" \
+                             f":meth:`{cls._artistcls.__name__}.{aname}'"
+            setattr(cls, aname, method)
+        # the setters
+        elif aname.startswith("set_") and callable(attribute) \
+                and not hasattr(cls, aname):
+            method = make_proxy_setter(aname)
+            method.__name__ = aname
+            method.__doc__ = "Proxy method for" \
+                             f":meth:`{cls._artistcls.__name__}.{aname}'"
+            setattr(cls, aname, method)
+    return cls
 
 
 class _ArtistProxy:
@@ -113,15 +232,18 @@ class _ArtistProxy:
     def __init__(self, label=None, **kwargs):
         """TODO: write docstring."""
         # TODO: not sure if stale is needed for this
-        self.stale = True
+        self.stale = True  # This only tracks form/layout and not style changes
         self._tags = []  # list of tag identifiers (label of a tag)
         self._artist = None
-        self.set_styling(kwargs)
+        self._is_styled = False  # Indicates if styling properties were set
+        self._kwargs = {}
+        self.update(**kwargs)
 
     def set_tags(self, tags: list):
         """Set a tag for the block."""
+        for tag in tags:
+            tag.register_proxy(self)
         self._tags = tags
-        # TODO: register to all tags!
 
     def get_tags(self):
         """Return the list of tags."""
@@ -147,21 +269,15 @@ class _ArtistProxy:
         """Indicate whether a block belongs to a tag or not."""
         return True if len(self._tags) else False
 
-    def set_property(self, prop, value):
-        """TODO: write docstring."""
-        self._kwargs.update(cbook.normalize_kwargs({prop: value}))
-
-    def set_styling(self, props):
-        """Set the styling of the element."""
-        self._original_kwargs = dict(props)
-        self._kwargs = cbook.normalize_kwargs(props, self._artistcls)
-
-    def get_styling(self, original=False):
-        """Return the custom styling properties of this element."""
-        if original:
-            return self._original_kwargs
-        else:
-            return self._kwargs
+    def update(self, **props):
+        # props = cbook.normalize_kwargs(props, self._artistcls)
+        for prop, value in props.items():
+            setter = getattr(self, f"set_{prop}", None)
+            if callable(setter):
+                setter(value)
+            else:
+                raise AttributeError(f"{self} has no attribute named '{prop}'")
+        return self.stale
 
     def get_styling_prop(self, prop: str, altval=None):
         """
@@ -181,38 +297,54 @@ class _ArtistProxy:
         be associated to proxies of various artist subclasses that might not
         all have the same set aliases.
         """
-        if self.is_tagged:
-            tagprops, _ = self._from_tags()
-            # prefer values from tags over the alternative value
-            altval = tagprops.get(prop, altval)
-        return self._kwargs.get(prop, altval)
+        if getattr(self, f"own_{prop}", False):
+            return getattr(self, f"get_{prop}")()
+        else:
+            if self.is_tagged:
+                tagprops, _ = self._from_tags()
+                # prefer values from tags over the alternative value
+                return tagprops.get(prop, altval)
+            # return self._kwargs.get(prop, altval)
+            # return getattr(self, f"get_{prop}", lambda: altval)()
+        return altval
 
     @property
     def is_styled(self,):
         """Indicate if this element has custom styling."""
-        return True if self.is_tagged or self._kwargs else False
+        # NOTE: self.is_tagged might be too general as tags might not affect
+        # fc, ec, lw, lw and aa
+        return (self.is_tagged or self._is_styled)
 
-    def _create_artist(self, ax, **kwargs):
+    def _init_artist(self, ax, **kwargs):
         """Initiate the artist."""
         raise NotImplementedError('Derived must override')
+
+    def _update_artist(self):
+        for prop, (args, kwargs) in self._kwargs.items():
+            getattr(self._artist, f"set_{prop}", None)(*args, **kwargs)
 
     def _pre_creation(self, ax=None, **non_artits_props):
         """Method handling properties foreign to the attached artist class."""
         pass
+
+    def _artist_prop(self, prop: str) -> True:
+        func = getattr(self._artistcls, f"set_{prop}", None)
+        if not callable(func):
+            # do a warning?
+            _log.warning(f"{self._artistcls.__name__!r} object "
+                         f"has no property {prop!r}")
+            return False
+        return True
 
     def _applicable_props(self, props):
         """TODO: write docstring."""
         applicable = dict()
         nonapp = dict()
         for k, v in props.items():
-            func = getattr(self._artistcls, f"set_{k}", None)
-            if not callable(func):
-                # do a warning?
-                _log.warning(f"{self._artistcls.__name__!r} object "
-                             f"has no property {k!r}")
-                nonapp[k] = v
-            else:
+            if self._artist_prop(k):
                 applicable[k] = v
+            else:
+                nonapp[k] = v
         return applicable, nonapp
 
     def _from_tags(self):
@@ -238,21 +370,20 @@ class _ArtistProxy:
         if self.is_tagged:
             # TODO: gather all properties from its tag
             tagprops, nonapp_props = self._from_tags()
-            print('from tags props', tagprops, nonapp_props)
             _props.update(tagprops)
+        # NOTE: using self._kwargs has moved to _update_artist
         # finally update with block specific styling
-        _props.update(self._kwargs)
-        print('after self kwargs', _props)
+        # _props.update(self._kwargs)
         _props, _nonapp_props = self._applicable_props(_props)
-        print('then applicable', _props)
         # combine the non-applicable properties from tags and proxy
         nonapp_props.update(_nonapp_props)
         self._pre_creation(ax, **nonapp_props)
-        self._create_artist(ax, **_props)
+        self._init_artist(ax, **_props)
+        self._update_artist()
 
-    def add_artist(self, ax):
-        """Adding the artist to an axes."""
-        raise NotImplementedError('Derived must override')
+    # def add_artist(self, ax):
+    #     """Adding the artist to an axes."""
+    #     raise NotImplementedError('Derived must override')
 
     def get_artist(self,):
         """TODO: write docstring."""
@@ -261,6 +392,7 @@ class _ArtistProxy:
         return self._artist
 
 
+@_expose_artist_getters_and_setters
 @cbook._define_aliases({"verticalalignment": ["va"],
                         "horizontalalignment": ["ha"], "width": ["w"],
                         "height": ["h"]})
@@ -274,6 +406,7 @@ class _Block(_ArtistProxy):
         `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
     """
     _artistcls = Rectangle
+    to_canonical = to_canonical(_artistcls)
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
@@ -327,51 +460,7 @@ class _Block(_ArtistProxy):
         self.in_margin = {'bottom': 0, 'top': 0}
         self.out_margin = {'bottom': 0, 'top': 0}
 
-    def get_xa(self):
-        """Return the x coordinate of the anchor point."""
-        return self._xa
-
-    def get_ya(self):
-        """Return the y coordinate of the anchor point."""
-        return self._ya
-
-    def get_xlim(self,):
-        """Returns the horizontal data limits as a tuple (x0, width)"""
-        return self.get_x(), self.get_width()
-
-    def get_ylim(self,):
-        """Returns the vertical data limits as a tuple (y0, height)"""
-        return self.get_y(), self.get_height()
-
-    def get_datalim(self,):
-        """Return the bounds (x0, y0, width, height) in data coordinates."""
-        x0, width = self.get_xlim()
-        y0, height = self.get_ylim()
-        return x0, y0, width, height
-
-    def get_bounds(self,):
-        """Return the bounds (x0, y0, width, height) of `.Bbox`."""
-        return self._artist.get_bbox().bounds
-
-    def get_height(self):
-        """Return the height of the block."""
-        if self._artist is not None:
-            return self._artist.get_height()
-        else:
-            return self._height
-
-    def get_width(self):
-        """Return the width of the block."""
-        # TODO: this should be functionalized for other attributes
-        try:
-            return self._artist.get_width()
-        except AttributeError:
-            return self._width
-
-    def get_anchor(self,):
-        """Return the anchor point of the block."""
-        return self._anchor
-
+    # getters and setters from attached artist
     def get_x(self):
         """Return the left coordinate of the block."""
         x0 = self._xa
@@ -394,35 +483,25 @@ class _Block(_ArtistProxy):
         """Return the left and bottom coords of the block as a tuple."""
         return self.get_x(), self.get_y()
 
-    def get_xc(self, ):
-        """Return the y coordinate of the block's center."""
-        return self.get_x() + 0.5 * self.get_width()
+    def get_width(self):
+        """Return the width of the block."""
+        # TODO: this should be functionalized for other attributes
+        try:
+            return self._artist.get_width()
+        except AttributeError:
+            return self._width
 
-    def get_yc(self, ):
-        """Return the y coordinate of the block's center."""
-        return self.get_y() + 0.5 * self._height
+    def get_height(self):
+        """Return the height of the block."""
+        if self._artist is not None:
+            return self._artist.get_height()
+        else:
+            return self._height
 
-    def get_center(self,):
-        """Return the center point of the block."""
-        return (self.get_xc(),
-                self.get_yc())
-
-    def get_outflows(self):
-        """Return a list of outgoing `._Flows`."""
-        return self._outflows
-
-    def get_inflows(self):
-        """Return a list of incoming `._Flows`."""
-        return self._inflows
-
-    def set_xa(self, xa):
-        """Set the x coordinate of the anchor point."""
-        self._xa = xa
-        self.stale = True
-
-    def set_ya(self, ya):
-        """Set the y coordinate of the anchor point."""
-        self._ya = ya
+    def set_x(self, x):
+        """Set the left coordinate of the rectangle."""
+        # TODO: take into account ha and set xa then
+        raise NotImplementedError('TODO')
         self.stale = True
 
     def set_y(self, y):
@@ -437,26 +516,76 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += self._height
 
-    def set_yc(self, yc):
+    def set_xy(self, xy):
         """
-        Set the y coordinate of the block center.
+        Set the left and bottom coordinates of the rectangle.
 
-        Note that this method alters the y coordinate of the anchor point.
+        Parameters
+        ----------
+        xy : (float, float)
         """
-        self._ya = yc
-        if self._verticalalignment == 'bottom':
-            self._ya -= 0.5 * self._height
-        elif self._verticalalignment == 'top':
-            self._ya += 0.5 * self._height
+        # TODO: use set_x and set_y here
+        raise NotImplementedError('TODO')
+        self.stale = True
 
     def set_width(self, width):
         """Set the width of the block."""
-        self._artist.set_width(width)
+        if self._artist is not None:
+            self._artist.set_width(width)
+        else:
+            return self._width
 
     def set_height(self, height):
         """Set the height of the block."""
+        # TODO: check if artist exists set its height if yes
         self._height = height
         self.stale = True
+
+    def set_bounds(self, *args):
+        """
+        Set the bounds of the rectangle as *left*, *bottom*, *width*, *height*.
+
+        The values may be passed as separate parameters or as a tuple::
+
+            set_bounds(left, bottom, width, height)
+            set_bounds((left, bottom, width, height))
+
+        .. ACCEPTS: (left, bottom, width, height)
+        """
+        if len(args) == 1:
+            l, b, w, h = args[0]
+        else:
+            l, b, w, h = args
+        # ###
+        # TODO: call set_x, set_y, set_width, set_heght
+        self._x0 = l
+        self._y0 = b
+        self._width = w
+        self._height = h
+        # ###
+
+        self.stale = True
+
+    # Note: get_bbox is not overwritten as we want to avoid requesting the
+    # bounding box before the artist is attached to an axis.
+
+    # custom getters and setters for this proxy
+
+    def get_xa(self):
+        """Return the x coordinate of the anchor point."""
+        return self._xa
+
+    def get_ya(self):
+        """Return the y coordinate of the anchor point."""
+        return self._ya
+
+    def get_xc(self, ):
+        """Return the y coordinate of the block's center."""
+        return self.get_x() + 0.5 * self.get_width()
+
+    def get_yc(self, ):
+        """Return the y coordinate of the block's center."""
+        return self.get_y() + 0.5 * self._height
 
     def _set_horizontalalignment(self, align):
         """TODO: write docstring."""
@@ -480,6 +609,49 @@ class _Block(_ArtistProxy):
         """Set the vertical alignment of the anchor point and the block."""
         self._set_verticalalignment(align)
 
+    def get_anchor(self,):
+        """Return the anchor point of the block."""
+        return self._anchor
+
+    def get_center(self,):
+        """Return the center point of the block."""
+        return (self.get_xc(),
+                self.get_yc())
+
+    def set_xa(self, xa):
+        """Set the x coordinate of the anchor point."""
+        self._xa = xa
+        self.stale = True
+
+    def set_ya(self, ya):
+        """Set the y coordinate of the anchor point."""
+        self._ya = ya
+        self.stale = True
+
+    def set_xc(self, xc):
+        # TODO: however, not sure if this is really needed.
+        raise NotImplementedError('TODO')
+
+    def set_yc(self, yc):
+        """
+        Set the y coordinate of the block center.
+
+        Note that this method alters the y coordinate of the anchor point.
+        """
+        self._ya = yc
+        if self._verticalalignment == 'bottom':
+            self._ya -= 0.5 * self._height
+        elif self._verticalalignment == 'top':
+            self._ya += 0.5 * self._height
+
+    def get_outflows(self):
+        """Return a list of outgoing `._Flows`."""
+        return self._outflows
+
+    def get_inflows(self):
+        """Return a list of incoming `._Flows`."""
+        return self._inflows
+
     def set_outflows(self, outflows):
         """TODO: write docstring."""
         self._outflows = outflows
@@ -497,6 +669,20 @@ class _Block(_ArtistProxy):
     outflows = property(get_outflows, set_outflows,
                         doc="List of `._Flow` objects leaving the block.")
 
+    def get_xlim(self,):
+        """Returns the horizontal data limits as a tuple (x0, width)"""
+        return self.get_x(), self.get_width()
+
+    def get_ylim(self,):
+        """Returns the vertical data limits as a tuple (y0, height)"""
+        return self.get_y(), self.get_height()
+
+    def get_datalim(self,):
+        """Return the bounds (x0, y0, width, height) in data coordinates."""
+        x0, width = self.get_xlim()
+        y0, height = self.get_ylim()
+        return x0, y0, width, height
+
     def add_outflow(self, outflow):
         """TODO: write docstring."""
         self._outflows.append(outflow)
@@ -505,15 +691,14 @@ class _Block(_ArtistProxy):
         """TODO: write docstring."""
         self._inflows.append(inflow)
 
-    def _create_artist(self, ax, **kwargs):
+    def _init_artist(self, ax, **kwargs):
         """Blocks use :class:`patches.Rectangle` as their patch."""
-        print('creating a block', kwargs)
         self._artist = self._artistcls(self.get_xy(), height=self._height,
                                        axes=ax, **kwargs)
 
-    def add_artist(self, ax):
-        """TODO: write docstring."""
-        self._artist = ax.add_patch(self._artist)
+    # def add_artist(self, ax):
+    #     """TODO: write docstring."""
+    #     self._artist = ax.add_patch(self._artist)
 
     def _set_loc_out_flows(self,):
         """TODO: write docstring."""
@@ -671,14 +856,14 @@ class _Block(_ArtistProxy):
     def get_inloc(self,):
         """TODO: write docstring."""
         # TODO: dont use dict here.
-        x0, y0, width, height = self.get_bounds()
+        x0, y0, width, height = self.get_bbox().bounds
         return {'bottom': (x0, y0),  # left, bottom
                 'top': (x0, y0 + height)}  # left, top
 
     def get_outloc(self,):
         """TODO: write docstring."""
         # _width = self.get_width()
-        x0, y0, width, height = self.get_bounds()
+        x0, y0, width, height = self.get_bbox().bounds
         # return {'top': (x0 + _width, y0 + self.get_height()),  # top right
         #         'bottom': (x0 + _width, y0)}  # right, bottom
         return {'top': (x0 + width, y0 + height),  # top right
@@ -693,11 +878,13 @@ class _Block(_ArtistProxy):
         self._set_anchor_out_flows()
 
 
+@_expose_artist_getters_and_setters
 class _Flow(_ArtistProxy):
     """
     A connection between two blocks from adjacent columns.
     """
     _artistcls = patches.PathPatch
+    to_canonical = to_canonical(_artistcls)
 
     def __init__(self, flow, source=None, target=None, label=None, **kwargs):
         """
@@ -729,7 +916,8 @@ class _Flow(_ArtistProxy):
 
         super().__init__(label=label, **kwargs)
 
-        self._kwargs = kwargs
+        # NOTE: kwargs can only be populated through setters from artist
+        # self._kwargs = kwargs
         self.source = source
         self.target = target
         self._original_flow = flow
@@ -781,12 +969,12 @@ class _Flow(_ArtistProxy):
 
     def _get_dimensions(self,):
         """Return the dimensions (width and height) of the linked Proxies."""
-        _sx0, _sy0, swidth, sheight = self.source.get_bounds()
-        _tx0, _ty0, twidth, theight = self.target.get_bounds()
+        _sx0, _sy0, swidth, sheight = self.source.get_bbox().bounds
+        _tx0, _ty0, twidth, theight = self.target.get_bbox().bounds
         return (swidth, sheight), (twidth, theight)
 
     # TODO: needs updating (no modifications of kwargs)
-    def _create_artist(self, ax, **kwargs):
+    def _init_artist(self, ax, **kwargs):
         """TODO: write docstring."""
         _ref_properties = {}
         for coloring in ['edgecolor', 'facecolor', 'color']:
@@ -882,16 +1070,18 @@ class _Flow(_ArtistProxy):
         for prop, ref_artist in _ref_properties.items():
             self._set_from_artist(prop, ref_artist)
 
-    def add_artist(self, ax):
-        """TODO: write docstring."""
-        self._artist = ax.add_patch(self._artist)
+    # def add_artist(self, ax):
+    #     """TODO: write docstring."""
+    #     self._artist = ax.add_patch(self._artist)
 
 
+@_expose_artist_getters_and_setters
 class _ProxyCollection(_ArtistProxy):
     """
     A collection of _ArtistProxy with common styling properties.
     """
     _artistcls = PatchCollection
+    to_canonical = to_canonical(_artistcls)
     _singular_props = ['zorder', 'hatch', 'pickradius', 'capstyle',
                        'joinstyle', 'cmap', 'norm']
 
@@ -931,20 +1121,26 @@ class _ProxyCollection(_ArtistProxy):
                        for sp in self._singular_props if sp in _styprops}
         # normalize
         _styprops = cbook.normalize_kwargs(_styprops, self._artistcls)
-        for k, v in _styprops.items():
-            # if k not in self._singular_props:
-            indiv_props[k] = [p.get_styling_prop(k, v)
-                              for p in self._proxies]
-            # else:
-            #    indiv_props[k] = v
+        for prop, altval in _styprops.items():
+            # indiv_props[prop] = [getattr(p, f"get_{prop}", lambda: altval)()
+            #                      for p in self._proxies]
+            indiv_props[prop] = [p.get_styling_prop(prop, altval)
+                                 for p in self._proxies]
         return indiv_props
 
     def _pre_creation(self, ax=None, **non_artits_props):
-        """TODO: write docstring."""
+        """Ensure all proxies create their own artists"""
         for proxy in self._proxies:
             proxy.create_artist(ax=ax, **non_artits_props)
 
-    def _create_artist(self, ax, **kwargs):
+    def _update_artist(self):
+        if self._match_original:
+            for props in ('facecolor', 'edgecolor', 'linewidth',
+                          'linestyle', 'antialiased'):
+                self._kwargs.pop(props, None)
+        super()._update_artist()
+
+    def _init_artist(self, ax, **kwargs):
         """
         Creates `.PatchCollections`s for the blocks in this collection.
 
@@ -952,17 +1148,15 @@ class _ProxyCollection(_ArtistProxy):
         ----------
 
         """
-        match_original = False
+        self._match_original = False
         if any(proxy.is_styled for proxy in self._proxies):
-            match_original = True
-        if match_original:
+            self._match_original = True
+        if self._match_original:
             kwargs = self.to_element_styling(kwargs)
-        print('matching orig', match_original)
-        print('collection kwargs', kwargs)
         # TODO: does this work with 'interpolate'?
         self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
-            match_original=match_original,
+            match_original=self._match_original,
             **kwargs
         )
         if self._cmap_data is not None:
@@ -1007,13 +1201,11 @@ class _Tag(cm.ScalarMappable):
     def update_scalarmappable(self):
         """Update colors from the scalar mappable array, if it is not None."""
         marked_obj_ids = list(self._marked_obj.keys())
-        print('oids', marked_obj_ids)
         self._proxy_props = {oid: {} for oid in marked_obj_ids}
         self.set_array(np.array(
             [getattr(self._marked_obj[oid], f'get_{self._mappable}')()
              for oid in marked_obj_ids]
         ))
-        print('\n\t', self._A)
         if self._A is None:
             return
         # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
@@ -1183,6 +1375,7 @@ class SubDiagram:
 
         Note that *x* and *columns* must be sequences of the same length.
         """
+        self.stale = True  # This only tracks form/layout and not style changes
         self._x = _to_valid_arrays(x, 'x')
         self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
@@ -1383,6 +1576,17 @@ class SubDiagram:
                 return self._hspace / (nbr_blocks - 1)
             else:
                 return 0
+
+    def update_blocks(self, cselector, bselector, **kwargs):
+        """
+        Update in all columns selected through *cselector* all blocks selected
+        through *bselector*:
+        """
+        for column in self._columns[cselector]:
+            for block in column:
+                bstale = block.update(*kwargs)
+            self.stale = self.stale or bstale
+        return self.stale
 
     def _distribute_blocks(self, col_id: int):
         """
@@ -1762,6 +1966,7 @@ class Alluvial:
         self._dlabels = []
         self._xlim = None
         self._ylim = None
+        self.staled_layout = True
         # how many x ticks are maximally shown
         self.max_nbr_xticks = 10
         self._defaults = dict()
@@ -2178,6 +2383,10 @@ class Alluvial:
 
     def finish(self,):
         """Draw the Alluvial diagram."""
+        if self.staled_layout:
+            # TODO: advise subds to generate layout
+            # TODO: draw the flows in extouts
+            self.staled_layout = False
         self._create_collections()
         # do some styling of the axes
         # TODO: make this a function of the layout
@@ -2238,7 +2447,22 @@ class Alluvial:
         """
         raise NotImplementedError('To be implemented')
 
-    def select_blocks(self, *args):
+    def update_blocks(self, selector, **kwargs):
+        """
+        Update the properties of a selection of blocks.
+        For details on the *selector* refer to :meth:`.select_blocks`.
+        """
+        # select the subdiagrams
+        # monitor stale of these subds
+        # for each pass rest of selector and kwargs
+        subdselect, colselect, blockselect = _normalize_selector(selector)
+        _subd_stale = False
+        for diagram in self._diagrams[subdselect]:
+            is_stale = diagram.update_blocks(colselect, blockselect, **kwargs)
+            # TODO: YOU ARE HERE
+            _subd_stale = _subd_stale or is_stale
+
+    def select_blocks(self, *selector):
         """
         Returns a selection of blocks across sub-diagrams and columns.
 
@@ -2270,35 +2494,11 @@ class Alluvial:
         Therefore, `select_blocks` might be difficult to use on columns with
         the layouts `'centered'` and `'optimized'`.
         """
-        nbr_args = len(args)
-        # convert all input to slices
-
-        def _to_slice(arg):
-            if isinstance(arg, int):
-                return slice(arg, arg + 1 if arg != -1 else None)
-            elif isinstance(arg, slice):
-                return arg
-            elif arg is None:
-                return slice(None, None)
-            else:
-                return slice(*arg)
-        args = [_to_slice(arg) for arg in args]
+        subdselect, colselect, blockselect = _normalize_selector(selector)
         blocks = []
-        if nbr_args == 1:
-            _subdselect = slice(None, None)
-            _colselect = slice(None, None)
-            _bselect = args[0]
-        elif nbr_args == 2:
-            _subdselect = slice(None, None)
-            _colselect = args[0]
-            _bselect = args[1]
-        elif nbr_args == 3:
-            _subdselect = args[0]
-            _colselect = args[1]
-            _bselect = args[2]
-        for diagram in self._diagrams[_subdselect]:
-            for col in diagram[_colselect]:
-                blocks.extend(col[_bselect])
+        for diagram in self._diagrams[subdselect]:
+            for col in diagram[colselect]:
+                blocks.extend(col[blockselect])
         return blocks
 
     def tag_blocks(self, tag, *args):

@@ -21,7 +21,8 @@ import matplotlib.patches as patches
 from matplotlib.rcsetup import cycler
 from matplotlib.legend import Legend
 import matplotlib.ticker as mticker
-# from datetime import datetime
+from matplotlib.dates import date2num, AutoDateLocator, AutoDateFormatter
+from datetime import datetime
 from bisect import bisect_left
 
 # TODO: unused so far
@@ -31,7 +32,7 @@ __author__ = 'Jonas I. Liechti'
 
 
 # TODO: check if cbook has something for this
-def _to_valid_arrays(data, attribute, dtype=np.float64):
+def _to_valid_arrays(data, attribute, dtype=None):
     """TODO: write docstring"""
     if data is None:
         return None
@@ -283,7 +284,7 @@ class _ArtistProxy:
         """
         Return the value of a specific styling property attached to this proxy
         or to one of its Tags.
-        If the property is not set *altval* is returned instead.
+        If the property was not explicitly set, *altval* is returned.
 
         Parameters
         ----------
@@ -1160,9 +1161,16 @@ class _ProxyCollection(_ArtistProxy):
             **kwargs
         )
         if self._cmap_data is not None:
-            self._artist.set_array(
-                np.asarray([getattr(proxy, f'get_{self._cmap_data}')()
-                            for proxy in self._proxies]))
+            _mappable_array = np.asarray([getattr(proxy,
+                                                  f'get_{self._cmap_data}')()
+                                          for proxy in self._proxies])
+            # Note: cmap does not (jet) work with datetime objects, so we
+            # convert them here
+            _first_mappable = cbook.safe_first_element(_mappable_array)
+            if isinstance(_first_mappable, datetime):
+                _mappable_array = date2num(_mappable_array)
+            print('mappable', _mappable_array)
+            self._artist.set_array(_mappable_array)
 
     def add_artist_to_axes(self, ax):
         """Adding the artist to an `~.axes.Axes`."""
@@ -1202,10 +1210,16 @@ class _Tag(cm.ScalarMappable):
         """Update colors from the scalar mappable array, if it is not None."""
         marked_obj_ids = list(self._marked_obj.keys())
         self._proxy_props = {oid: {} for oid in marked_obj_ids}
-        self.set_array(np.array(
-            [getattr(self._marked_obj[oid], f'get_{self._mappable}')()
-             for oid in marked_obj_ids]
-        ))
+        _mappable_array = np.asarray([getattr(self._marked_obj[oid],
+                                              f'get_{self._mappable}')()
+                                      for oid in marked_obj_ids])
+        # Note: cmap does not (jet) work with datetime objects, so we convert
+        # them here
+        _first_mappable = cbook.safe_first_element(_mappable_array)
+        if isinstance(_first_mappable, datetime):
+            _mappable_array = date2num(_mappable_array)
+        print('mappable', _mappable_array)
+        self.set_array(_mappable_array)
         if self._A is None:
             return
         # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
@@ -2303,7 +2317,7 @@ class Alluvial:
         # TODO: make sure empty flows are accepted
         if flows is not None:
             nbr_cols = len(flows) + 1
-            flows = _to_valid_arrays(flows, attribute='flows')
+            flows = _to_valid_arrays(flows, attribute='flows', dtype=np.float64)
         else:
             flows = []
             nbr_cols = None
@@ -2323,7 +2337,7 @@ class Alluvial:
             # Note: extout from the first column are ignored
             cinit = flows[0].sum(0)
         else:
-            ext = _to_valid_arrays(ext, 'ext')
+            ext = _to_valid_arrays(ext, 'ext', np.float64)
             if isinstance(ext[0], np.ndarray):
                 cinit = ext[0]
                 if nbr_cols is None:  # if no flows were provided
@@ -2392,9 +2406,15 @@ class Alluvial:
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')
         x_positions = self._collect_x_positions()
-        self.ax.xaxis.set_major_locator(
-            mticker.FixedLocator(x_positions, self.max_nbr_xticks - 1)
-        )
+        print('locator', x_positions)
+        x0 = cbook.safe_first_element(x_positions)
+        if isinstance(x0, datetime):
+            majloc = self.ax.xaxis.set_major_locator(AutoDateLocator())
+            self.ax.xaxis.set_major_formatter(AutoDateFormatter(majloc))
+        else:
+            self.ax.xaxis.set_major_locator(
+                mticker.FixedLocator(x_positions, self.max_nbr_xticks - 1)
+            )
         self.ax.set_xlim(*self._xlim)
         self.ax.set_ylim(*self._ylim)
 

@@ -157,7 +157,10 @@ class TestAlluvialStyling:
         pc = []
         pc.append(Rectangle((0, 0), width=1, height=3, **style))
         pc.append(Rectangle((0, 4), width=1, height=1, **style))
+        # custom styling for a single rectangle
+        style['ec'] = 'black'
         pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
+        style['ec'] = 'green'
         refax.add_collection(PatchCollection(pc, match_original=True, zorder=4))
         # ###
         # tesax
@@ -167,7 +170,9 @@ class TestAlluvialStyling:
                                 **style)
         # set the styling of a single block
         block = diagram0.get_block((1, 0))  # column 1, block 0
-        block.set_property('facecolor', 'red')
+        block.set_facecolor('red')
+        block.set_ec('black')
+        # block.set_property('facecolor', 'red')
         alluvial.finish()
         # ###
 
@@ -216,7 +221,8 @@ class TestAlluvialStyling:
         # B  > SubDiagram:
         # set the styling of a single block in an already styled subdiagram
         block = diagram1.get_block((1, 1))  # column 1, block 0
-        block.set_property('facecolor', block_c)
+        block.set_facecolor(block_c)
+        # block.set_property('facecolor', block_c)
         alluvial.finish()
         # ###
 

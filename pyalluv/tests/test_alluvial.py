@@ -218,7 +218,7 @@ class TestAlluvialStyling:
         # Tag > SubD:
         tag = alluvial.register_tag('tag0', fc=tag_c)
         alluvial.tag_blocks(tag, 1, 1, None)
-        # B  > SubDiagram:
+        # Block  > Tag:
         # set the styling of a single block in an already styled subdiagram
         block = diagram1.get_block((1, 1))  # column 1, block 0
         block.set_facecolor(block_c)

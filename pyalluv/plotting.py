@@ -350,7 +350,7 @@ class _ArtistProxy:
         _kwargs.update(self._kwargs)
         self._artist.update(_kwargs)
 
-    def _post_creation(self,):
+    def _post_creation(self, ax=None):
         """Callback after the creation and init of artist."""
         pass
 
@@ -382,6 +382,7 @@ class _ArtistProxy:
         self._pre_creation(ax=ax, **pc_props)
         self._init_artist(ax)
         self._update_artist(**props)
+        self._post_creation(ax=ax)
 
     # def add_artist(self, ax):
     #     """Adding the artist to an axes."""
@@ -709,38 +710,36 @@ class _Block(_ArtistProxy):
         self._artist = self._artistcls(self.get_xy(), width=self._width,
                                        height=self._height, axes=ax)
 
-    # def add_artist(self, ax):
-    #     """TODO: write docstring."""
-    #     self._artist = ax.add_patch(self._artist)
+    def _post_creation(self, ax=None):
+        self.handle_flows()
 
     def _set_loc_out_flows(self,):
-        """TODO: write docstring."""
+        """
+        Determine fore all outgoing flows if they should be attached on top
+        or at the bottom.
+        """
         yc = self.get_yc()
         for out_flow in self._outflows:
             in_loc = None
             out_loc = None
             if out_flow.target is not None:
-                target_inloc = out_flow.target.get_inloc()
-                if yc > out_flow.target.get_yc():
-                    # draw to top
-                    if yc >= target_inloc['top'][1]:
-                        # draw from bottom to in top
-                        out_loc = 'bottom'
-                        in_loc = 'top'
+                t_yc = out_flow.target.get_yc()
+                t_height = out_flow.target.get_height()
+                # target_inloc = out_flow.target.get_inloc()
+                if yc > t_yc:
+                    in_loc = 'top'  # draw to top
+                    # if yc >= target_inloc['top'][1]:
+                    if yc >= t_yc + 0.5 * t_height:
+                        out_loc = 'bottom'  # draw from bottom to in top
                     else:
-                        # draw from top to top
-                        out_loc = 'top'
-                        in_loc = 'top'
+                        out_loc = 'top'  # draw from top to top
                 else:
-                    # draw to bottom
-                    if yc <= target_inloc['bottom'][1]:
-                        # draw from top to bottom
-                        out_loc = 'top'
-                        in_loc = 'bottom'
+                    in_loc = 'bottom'  # draw to bottom
+                    # if yc <= target_inloc['bottom'][1]:
+                    if yc <= t_yc - 0.5 * t_height:
+                        out_loc = 'top'  # draw from top to bottom
                     else:
-                        # draw form bottom to bottom
-                        out_loc = 'bottom'
-                        in_loc = 'bottom'
+                        out_loc = 'bottom'  # draw form bottom to bottom
             else:
                 out_flow.out_loc = out_flow.out_flow_vanish
             out_flow.in_loc = in_loc
@@ -869,16 +868,14 @@ class _Block(_ArtistProxy):
     def get_inloc(self,):
         """TODO: write docstring."""
         # TODO: dont use dict here.
+        # NOTE: This only works when using _expose_artist_getters_and_setters
         x0, y0, width, height = self.get_bbox().bounds
         return {'bottom': (x0, y0),  # left, bottom
                 'top': (x0, y0 + height)}  # left, top
 
     def get_outloc(self,):
         """TODO: write docstring."""
-        # _width = self.get_width()
         x0, y0, width, height = self.get_bbox().bounds
-        # return {'top': (x0 + _width, y0 + self.get_height()),  # top right
-        #         'bottom': (x0 + _width, y0)}  # right, bottom
         return {'top': (x0 + width, y0 + height),  # top right
                 'bottom': (x0 + width, y0)}  # right, bottom
 
@@ -923,18 +920,16 @@ class _Flow(_ArtistProxy):
         """
         # self._interp_steps = kwargs.pop('interpolation_steps', 1)
         self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
-        self.default_fc = 'gray'
-        self.default_ec = 'gray'
-        self.default_alpha = 1.0
 
         super().__init__(label=label, **kwargs)
 
-        # NOTE: kwargs can only be populated through setters from artist
-        # self._kwargs = kwargs
         self.source = source
         self.target = target
+        # TODO: Is this really needed?
         self._original_flow = flow
         self.flow = flow
+        self.out_loc = None
+        self.in_loc = None
         # attach the flow to the source and target blocks
         if self.source is not None:
             self.source.add_outflow(self)
@@ -942,85 +937,22 @@ class _Flow(_ArtistProxy):
             self.target.add_inflow(self)
         self.stale = True
 
-    def _set_from_artist(self, attr, artist):
-        """TODO: write docstring."""
-        name = '_%s' % attr
-        setattr(self._artist, name, getattr(artist, name))
-
-    # TODO: unused > should this be removed?
-    def _update_artist_from(self, other):
-        """TODO: write docstring."""
-        # For some properties we don't need or don't want to go through the
-        # getters/setters, so we just copy them directly.
-        self._artist._transform = other._transform
-        self._artist._transformSet = other._transformSet
-        self._artist._visible = other._visible
-        self._artist._alpha = other._alpha
-        self._artist.clipbox = other.clipbox
-        self._artist._clipon = other._clipon
-        self._artist._clippath = other._clippath
-        # self._label = other._label
-        self._artist._sketch = other._sketch
-        self._artist._path_effects = other._path_effects
-        self._artist.sticky_edges.x[:] = other.sticky_edges.x.copy()
-        self._artist.sticky_edges.y[:] = other.sticky_edges.y.copy()
-        self._artist.pchanged()
-        self._artist._edgecolor = other._edgecolor
-        self._artist._facecolor = other._facecolor
-        self._artist._original_edgecolor = other._original_edgecolor
-        self._artist._original_facecolor = other._original_facecolor
-        self._artist._fill = other._fill
-        self._artist._hatch = other._hatch
-        self._artist._hatch_color = other._hatch_color
-        # copy the unscaled dash pattern
-        self._artist._us_dashes = other._us_dashes
-        self._artist.set_linewidth(other._linewidth)  # also sets dash properties
-        self._artist.set_transform(other.get_data_transform())
-        # If the transform of other needs further initialization, then it will
-        # be the case for this artist too.
-        self._artist._transformSet = other.is_transform_set()
-
-    def _get_dimensions(self,):
+    def _get_widths(self,):
         """Return the dimensions (width and height) of the linked Proxies."""
-        _sx0, _sy0, swidth, sheight = self.source.get_bbox().bounds
-        _tx0, _ty0, twidth, theight = self.target.get_bbox().bounds
-        return (swidth, sheight), (twidth, theight)
-
-    def _pre_creation(self, **kwargs):
-        self._ref_properties = {}
-        _ref_properties = {}
-        for coloring in ['edgecolor', 'facecolor', 'color']:
-            color = kwargs.get(coloring, None)
-
-            ###
-            # TODO: handle the 'source'/'target'/'interpolate'/'migrate' cases
-            # from mpl
-            # def get_edgecolor(self):
-            #     if cbook._str_equal(self._edgecolors, 'face'):
-            #         return self.get_facecolor()
-            #     else:
-            #         return self._edgecolors
-            ###
-
-            if color == 'source':
-                _ref_properties[coloring] = self.source
-            elif color == 'target':
-                _ref_properties[coloring] = self.target
-            elif color == 'interpolate':
-                # TODO
-                _ref_properties[coloring] = None
+        _sx0, _sy0, swidth, _sheight = self.source.get_bbox().bounds
+        _tx0, _ty0, twidth, _theight = self.target.get_bbox().bounds
+        return swidth, twidth
 
     def _init_artist(self, ax):
         """TODO: write docstring."""
-
-        (_sw, _sh), (_tw, _th) = self._get_dimensions()
+        swidth, twidth = self._get_widths()
         _dist = None
         if self.out_loc is not None:
             if self.in_loc is not None:
                 _dist = 2 / 3 * (self.target.get_inloc()['bottom'][0] -
                                  self.source.get_outloc()['bottom'][0])
             else:
-                _dist = 2 * _sw
+                _dist = 2 * swidth
             if self.in_loc is not None:
                 pass
             else:
@@ -1029,7 +961,7 @@ class _Flow(_ArtistProxy):
         # now complete the path points
         print(self.anchor_out, self.anchor_in)
         if self.anchor_out is not None:
-            anchor_out_inner = (self.anchor_out[0] - 0.5 * _sw,
+            anchor_out_inner = (self.anchor_out[0] - 0.5 * swidth,
                                 self.anchor_out[1])
             dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
         else:
@@ -1038,7 +970,7 @@ class _Flow(_ArtistProxy):
             # dir_out_anchor =
             pass
         if self.top_out is not None:
-            top_out_inner = (self.top_out[0] - 0.5 * _sw, self.top_out[1])
+            top_out_inner = (self.top_out[0] - 0.5 * swidth, self.top_out[1])
             # 2nd point 2/3 of distance between clusters
             dir_out_top = (self.top_out[0] + _dist, self.top_out[1])
         else:
@@ -1047,7 +979,7 @@ class _Flow(_ArtistProxy):
             # dir_out_top =
             pass
         if self.anchor_in is not None:
-            anchor_in_inner = (self.anchor_in[0] + 0.5 * _tw,
+            anchor_in_inner = (self.anchor_in[0] + 0.5 * twidth,
                                self.anchor_in[1])
             dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
         else:
@@ -1056,7 +988,7 @@ class _Flow(_ArtistProxy):
             # dir_in_anchor =
             pass
         if self.top_in is not None:
-            top_in_inner = (self.top_in[0] + 0.5 * _tw, self.top_in[1])
+            top_in_inner = (self.top_in[0] + 0.5 * twidth, self.top_in[1])
             dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
         else:
             # TODO set to form new in flow
@@ -1081,13 +1013,21 @@ class _Flow(_ArtistProxy):
         self._artist = self._artistcls(_path, axes=ax)
 
     def _update_artist(self, **kwargs):
-        # TODO: this is old
-        for prop, ref_artist in self._ref_properties.items():
-            self._set_from_artist(prop, ref_artist)
-
-    # def add_artist(self, ax):
-    #     """TODO: write docstring."""
-    #     self._artist = ax.add_patch(self._artist)
+        """Update the artist of a _Flow."""
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        # resolve properties that simply point to the source or target block
+        for prop, value in _kwargs.items():
+            if value == 'source':
+                _kwargs[prop] = getattr(self.source, f"get_{prop}")()
+            elif value == 'target':
+                _kwargs[prop] = getattr(self.target, f"get_{prop}")()
+            elif value == 'interpolate':
+                # TODO:
+                raise NotImplementedError("The mode 'interpolate' for the"
+                                          f" property '{prop}' of a _Flow is"
+                                          "not yet implemented")
+        self._artist.update(_kwargs)
 
 
 @_expose_artist_getters_and_setters
@@ -1189,12 +1129,10 @@ class _ProxyCollection(_ArtistProxy):
                 _kwargs.pop(props, None)
         self._artist.update(_kwargs)
 
-    def _post_creation(self,):
+    def _post_creation(self, ax=None):
+        # ###
         # TODO: broadcast styling to proxies
-        pass
-
-    def add_artist_to_axes(self, ax):
-        """Adding the artist to an `~.axes.Axes`."""
+        # ###
         self._artist = ax.add_collection(self._artist)
 
     def add_proxy(self, proxy):
@@ -1204,7 +1142,8 @@ class _ProxyCollection(_ArtistProxy):
 
 class _Tag(cm.ScalarMappable):
     """
-
+    Class to create sets of styling properties that can be attached to various
+    ArtistPropxies.
     """
     def __init__(self):
         """
@@ -1853,13 +1792,9 @@ class SubDiagram:
         # first create the blocks
         _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
         self._blocks.create_artist(ax=ax, **_blockkws)
-        self._blocks.add_artist_to_axes(ax)
-        for block in self._blocks:
-            block.handle_flows()
         # then create the flows
         _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
         self._flows.create_artist(ax=ax, **_flowkws)
-        self._flows.add_artist_to_axes(ax)
         # at last make sure the datalimits are updated
         self._update_datalim()
 

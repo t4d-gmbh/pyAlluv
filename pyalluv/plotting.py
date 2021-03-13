@@ -143,8 +143,9 @@ def to_canonical(alias_mapping=None):
     # moved and used in cbook directly
     if alias_mapping is None:
         alias_mapping = dict()
-    elif (isinstance(alias_mapping, type) and issubclass(alias_mapping, Artist)
-          or isinstance(alias_mapping, Artist)):
+    elif (isinstance(alias_mapping, type) and
+          issubclass(alias_mapping, Artist) or
+          isinstance(alias_mapping, Artist)):
         alias_mapping = getattr(alias_mapping, "_alias_map", {})
 
     _to_canonical = {alias: canonical
@@ -179,7 +180,7 @@ def _expose_artist_getters_and_setters(cls):
                                           " is initiated.")
         return method
 
-    def make_proxy_setter(name):  # Enforce a closure over *name*.
+    def make_proxy_setter(name, argnames):  # Enforce a closure over *name*.
         @functools.wraps(getattr(cls._artistcls, name))
         def method(self, *args, **kwargs):
             prop = cls.to_canonical(name.replace("set_", ""))
@@ -191,8 +192,12 @@ def _expose_artist_getters_and_setters(cls):
             if self._artist is not None:
                 return getattr(self._artist, name)(*args, **kwargs)
             else:
-                # only store canonical names
-                self._kwargs[prop] = (args, kwargs)
+                # get the value either by position or by key
+                if args:
+                    value = args[0]
+                else:
+                    value = kwargs[argnames[0]]
+                self._kwargs[prop] = value
         return method
 
     # get the getters and setters from _artist
@@ -201,6 +206,8 @@ def _expose_artist_getters_and_setters(cls):
         artistcls_fcts = inspect.getmembers(cls._artistcls,
                                             predicate=inspect.isfunction)
     for aname, attribute in artistcls_fcts:
+        specs = inspect.getfullargspec(attribute)
+        argnames = specs[0]  # raise error if argnames contains more than 1?
         # the getters
         if aname.startswith("get_") and callable(attribute) \
                 and not hasattr(cls, aname):
@@ -212,7 +219,7 @@ def _expose_artist_getters_and_setters(cls):
         # the setters
         elif aname.startswith("set_") and callable(attribute) \
                 and not hasattr(cls, aname):
-            method = make_proxy_setter(aname)
+            method = make_proxy_setter(aname, argnames)
             method.__name__ = aname
             method.__doc__ = "Proxy method for" \
                              f":meth:`{cls._artistcls.__name__}.{aname}'"
@@ -233,8 +240,10 @@ class _ArtistProxy:
     def __init__(self, label=None, **kwargs):
         """TODO: write docstring."""
         # TODO: not sure if stale is needed for this
-        self.stale = True  # This only tracks form/layout and not style changes
-        self._tags = []  # list of tag identifiers (label of a tag)
+        self.stale = True   # This only tracks form/layout but no style changes
+        self._tags = []     # list of tag identifiers (label of a tag)
+        self._tag_props = dict()  # stores properties from tags
+        self._tag_props_nonappl = dict()  # stores properties from tags that
         self._artist = None
         self._is_styled = False  # Indicates if styling properties were set
         self._kwargs = {}
@@ -261,6 +270,7 @@ class _ArtistProxy:
         if tag in self._tags:
             tag.deregister_proxy(self)
             self._tags.remove(tag)
+            self._set_tag_props()
 
     # TODO: not sure if needed
     tags = property(get_tags, set_tags)
@@ -269,6 +279,19 @@ class _ArtistProxy:
     def is_tagged(self):
         """Indicate whether a block belongs to a tag or not."""
         return True if len(self._tags) else False
+
+    def _set_tag_props(self):
+        """
+        Request properties from all of its tags and initiate tag to update
+        if a tag is staled.
+        """
+        self._tag_props = dict()
+        self._tag_props_nonappl = dict()
+        for tag in self._tags:
+            _tag_props, _nonappl = self._applicable(tag.get_props(id(self)))
+            _tag_props = cbook.normalize_kwargs(_tag_props, self._artistcls)
+            self._tag_props.update(_tag_props)
+            self._tag_props_nonappl.update(_nonappl)
 
     def update(self, **props):
         # props = cbook.normalize_kwargs(props, self._artistcls)
@@ -280,7 +303,7 @@ class _ArtistProxy:
                 raise AttributeError(f"{self} has no attribute named '{prop}'")
         return self.stale
 
-    def get_styling_prop(self, prop: str, altval=None):
+    def get(self, prop: str, altval=None):
         """
         Return the value of a specific styling property attached to this proxy
         or to one of its Tags.
@@ -302,11 +325,9 @@ class _ArtistProxy:
             return getattr(self, f"get_{prop}")()
         else:
             if self.is_tagged:
-                tagprops, _ = self._from_tags()
-                # prefer values from tags over the alternative value
-                return tagprops.get(prop, altval)
-            # return self._kwargs.get(prop, altval)
-            # return getattr(self, f"get_{prop}", lambda: altval)()
+                if not self._tag_props:
+                    self._set_tag_props()
+                return self._tag_props.get(prop, altval)
         return altval
 
     @property
@@ -316,71 +337,51 @@ class _ArtistProxy:
         # fc, ec, lw, lw and aa
         return (self.is_tagged or self._is_styled)
 
-    def _init_artist(self, ax, **kwargs):
-        """Initiate the artist."""
-        raise NotImplementedError('Derived must override')
-
-    def _update_artist(self):
-        for prop, (args, kwargs) in self._kwargs.items():
-            getattr(self._artist, f"set_{prop}", None)(*args, **kwargs)
-
-    def _pre_creation(self, ax=None, **non_artits_props):
+    def _pre_creation(self, ax, **kwargs):
         """Method handling properties foreign to the attached artist class."""
         pass
 
-    def _artist_prop(self, prop: str) -> True:
-        func = getattr(self._artistcls, f"set_{prop}", None)
-        if not callable(func):
-            # do a warning?
-            _log.warning(f"{self._artistcls.__name__!r} object "
-                         f"has no property {prop!r}")
-            return False
-        return True
+    def _init_artist(self, ax):
+        """Initiate the artist."""
+        raise NotImplementedError('Derived must override')
 
-    def _applicable_props(self, props):
-        """TODO: write docstring."""
+    def _update_artist(self, **kwargs):
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        self._artist.update(_kwargs)
+
+    def _post_creation(self,):
+        """Callback after the creation and init of artist."""
+        pass
+
+    def _applicable(self, props):
+        """
+        Separate *props* into applicable and non-applicable properties.
+        Applicable are properties for which the proxy has a 'set_' method.
+        """
         applicable = dict()
         nonapp = dict()
-        for k, v in props.items():
-            if self._artist_prop(k):
-                applicable[k] = v
+        for prop, v in props.items():
+            if hasattr(self._artistcls, f"set_{prop}"):
+                applicable[prop] = v
             else:
-                nonapp[k] = v
+                nonapp[prop] = v
         return applicable, nonapp
-
-    def _from_tags(self):
-        """
-        Get styling properties from all tags of this proxy.
-
-        Note that styling properties of more recently added tags are
-        prioritized, if multiple tags are present.
-        """
-        tagprops, nonapp_tagprops = dict(), dict()
-        for tag in self._tags:
-            _tprops, _natporop = self._applicable_props(tag.get_props(id(self)))
-            _tprops = cbook.normalize_kwargs(_tprops, self._artistcls)
-            tagprops.update(_tprops)
-            nonapp_tagprops.update(_natporop)
-        return tagprops, nonapp_tagprops
 
     def create_artist(self, ax, **props):
         """Create the artist of this proxy."""
-        _props = cbook.normalize_kwargs(props, self._artistcls)
-        nonapp_props = dict()
-        # process the tags
-        if self.is_tagged:
-            # TODO: gather all properties from its tag
-            tagprops, nonapp_props = self._from_tags()
-            _props.update(tagprops)
-        # NOTE: using self._kwargs has moved to _update_artist
-        # finally update with block specific styling
-        # _props.update(self._kwargs)
-        _props, _nonapp_props = self._applicable_props(_props)
-        # combine the non-applicable properties from tags and proxy
-        nonapp_props.update(_nonapp_props)
-        self._pre_creation(ax, **nonapp_props)
-        self._init_artist(ax, **_props)
-        self._update_artist()
+        props = cbook.normalize_kwargs(props, self._artistcls)
+        props, nonappl_props = self._applicable(props)
+        # make sure to have the properties from all tags
+        self._set_tag_props()
+        props.update(self._tag_props)
+        # collect all properties to pass to pre_creation
+        pc_props = dict(props)
+        pc_props.update(nonappl_props)
+        pc_props.update(self._tag_props_nonappl)
+        self._pre_creation(ax=ax, **pc_props)
+        self._init_artist(ax)
+        self._update_artist(**props)
 
     # def add_artist(self, ax):
     #     """Adding the artist to an axes."""
@@ -411,7 +412,7 @@ class _Block(_ArtistProxy):
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
-    def __init__(self, height, xa=None, ya=None, label=None,
+    def __init__(self, height, width=None, xa=None, ya=None, label=None,
                  tag=None, horizontalalignment='left',
                  verticalalignment='bottom', label_margin=(0, 0),
                  **kwargs):
@@ -447,7 +448,7 @@ class _Block(_ArtistProxy):
         super().__init__(label=label, **kwargs)
 
         self._height = height
-        self._width = None
+        self._width = width
         self._xa = xa
         self._ya = ya
         self._set_horizontalalignment(horizontalalignment)
@@ -531,15 +532,17 @@ class _Block(_ArtistProxy):
 
     def set_width(self, width):
         """Set the width of the block."""
+        self._width = width
         if self._artist is not None:
             self._artist.set_width(width)
-        else:
-            return self._width
+        self.stale = True
 
     def set_height(self, height):
         """Set the height of the block."""
         # TODO: check if artist exists set its height if yes
         self._height = height
+        if self._artist is not None:
+            self._artist.set_height(height)
         self.stale = True
 
     def set_bounds(self, *args):
@@ -692,10 +695,19 @@ class _Block(_ArtistProxy):
         """TODO: write docstring."""
         self._inflows.append(inflow)
 
-    def _init_artist(self, ax, **kwargs):
+    def _pre_creation(self, ax=None, **kwargs):
+        if self._width is None:
+            try:
+                self.set_width(kwargs['width'])
+            except KeyError:
+                raise AttributeError("Block is missing the required argument"
+                                     " 'width'.")
+
+    def _init_artist(self, ax):
         """Blocks use :class:`patches.Rectangle` as their patch."""
-        self._artist = self._artistcls(self.get_xy(), height=self._height,
-                                       axes=ax, **kwargs)
+        # TODO: get width from kwargs and use 'set_width'
+        self._artist = self._artistcls(self.get_xy(), width=self._width,
+                                       height=self._height, axes=ax)
 
     # def add_artist(self, ax):
     #     """TODO: write docstring."""
@@ -974,12 +986,11 @@ class _Flow(_ArtistProxy):
         _tx0, _ty0, twidth, theight = self.target.get_bbox().bounds
         return (swidth, sheight), (twidth, theight)
 
-    # TODO: needs updating (no modifications of kwargs)
-    def _init_artist(self, ax, **kwargs):
-        """TODO: write docstring."""
+    def _pre_creation(self, **kwargs):
+        self._ref_properties = {}
         _ref_properties = {}
         for coloring in ['edgecolor', 'facecolor', 'color']:
-            color = kwargs.pop(coloring, None)
+            color = kwargs.get(coloring, None)
 
             ###
             # TODO: handle the 'source'/'target'/'interpolate'/'migrate' cases
@@ -999,6 +1010,9 @@ class _Flow(_ArtistProxy):
                 # TODO
                 _ref_properties[coloring] = None
 
+    def _init_artist(self, ax):
+        """TODO: write docstring."""
+
         (_sw, _sh), (_tw, _th) = self._get_dimensions()
         _dist = None
         if self.out_loc is not None:
@@ -1007,10 +1021,7 @@ class _Flow(_ArtistProxy):
                                  self.source.get_outloc()['bottom'][0])
             else:
                 _dist = 2 * _sw
-                # kwargs = _out_kwargs
-        else:
             if self.in_loc is not None:
-                # kwargs = _in_kwargs
                 pass
             else:
                 raise Exception('flow with neither source nor target cluster')
@@ -1067,8 +1078,11 @@ class _Flow(_ArtistProxy):
         readonly = True
         interp_steps = 1
         _path = Path(vertices, codes, interp_steps, closed, readonly)
-        self._artist = self._artistcls(_path, axes=ax, **kwargs)
-        for prop, ref_artist in _ref_properties.items():
+        self._artist = self._artistcls(_path, axes=ax)
+
+    def _update_artist(self, **kwargs):
+        # TODO: this is old
+        for prop, ref_artist in self._ref_properties.items():
             self._set_from_artist(prop, ref_artist)
 
     # def add_artist(self, ax):
@@ -1106,6 +1120,7 @@ class _ProxyCollection(_ArtistProxy):
 
         # TODO: this can be more generally just a ArtistProxy
         self._proxies = proxies
+        self._match_original = None
 
     def __iter__(self):
         return iter(self._proxies)
@@ -1115,33 +1130,32 @@ class _ProxyCollection(_ArtistProxy):
 
     def to_element_styling(self, styleprops: dict):
         """
-        Convert the styling properties to lists matching self._blocks.
+        Convert the styling properties to lists matching self._proxies.
         """
-        _styprops = dict(styleprops)
+        # normalize
+        _styprops = cbook.normalize_kwargs(styleprops, self._artistcls)
         indiv_props = {sp: _styprops.pop(sp)
                        for sp in self._singular_props if sp in _styprops}
-        # normalize
-        _styprops = cbook.normalize_kwargs(_styprops, self._artistcls)
         for prop, altval in _styprops.items():
             # indiv_props[prop] = [getattr(p, f"get_{prop}", lambda: altval)()
             #                      for p in self._proxies]
-            indiv_props[prop] = [p.get_styling_prop(prop, altval)
+            indiv_props[prop] = [p.get(prop, altval)
                                  for p in self._proxies]
         return indiv_props
 
-    def _pre_creation(self, ax=None, **non_artits_props):
+    def _pre_creation(self, ax=None, **kwargs):
         """Ensure all proxies create their own artists"""
+        self._match_original = False
         for proxy in self._proxies:
-            proxy.create_artist(ax=ax, **non_artits_props)
-
-    def _update_artist(self):
+            proxy.create_artist(ax=ax, **kwargs)
+            if proxy.is_styled:
+                self._match_original = True
         if self._match_original:
-            for props in ('facecolor', 'edgecolor', 'linewidth',
-                          'linestyle', 'antialiased'):
-                self._kwargs.pop(props, None)
-        super()._update_artist()
+            self._proxy_props = self.to_element_styling(kwargs)
+        else:
+            self._proxy_props = dict()
 
-    def _init_artist(self, ax, **kwargs):
+    def _init_artist(self, ax):
         """
         Creates `.PatchCollections`s for the blocks in this collection.
 
@@ -1149,16 +1163,10 @@ class _ProxyCollection(_ArtistProxy):
         ----------
 
         """
-        self._match_original = False
-        if any(proxy.is_styled for proxy in self._proxies):
-            self._match_original = True
-        if self._match_original:
-            kwargs = self.to_element_styling(kwargs)
         # TODO: does this work with 'interpolate'?
         self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
             match_original=self._match_original,
-            **kwargs
         )
         if self._cmap_data is not None:
             _mappable_array = np.asarray([getattr(proxy,
@@ -1169,8 +1177,21 @@ class _ProxyCollection(_ArtistProxy):
             _first_mappable = cbook.safe_first_element(_mappable_array)
             if isinstance(_first_mappable, datetime):
                 _mappable_array = date2num(_mappable_array)
-            print('mappable', _mappable_array)
             self._artist.set_array(_mappable_array)
+
+    def _update_artist(self, **kwargs):
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        if self._match_original:
+            # make sure to not overwrite individual properties
+            for props in ('facecolor', 'edgecolor', 'linewidth',
+                          'linestyle', 'antialiased'):
+                _kwargs.pop(props, None)
+        self._artist.update(_kwargs)
+
+    def _post_creation(self,):
+        # TODO: broadcast styling to proxies
+        pass
 
     def add_artist_to_axes(self, ax):
         """Adding the artist to an `~.axes.Axes`."""
@@ -1183,9 +1204,9 @@ class _ProxyCollection(_ArtistProxy):
 
 class _Tag(cm.ScalarMappable):
     """
-    A collection of `Blocks`
+
     """
-    def __init__(self, **kwargs):
+    def __init__(self):
         """
         Parameters
         ----------
@@ -1199,14 +1220,14 @@ class _Tag(cm.ScalarMappable):
         self._alpha = None
         self._mappable = None
         self._mappables = dict()
-        if kwargs:
-            _kwargs = dict(kwargs)
-            self._label = _kwargs.pop('label', None)
-            self.style(**_kwargs)
-        self._closed = False
+        # if kwargs:
+        #     _kwargs = dict(kwargs)
+        #     # self._label = _kwargs.pop('label', None)
+        #     self.set(**_kwargs)
+        self.stale = True
 
     # from collection
-    def update_scalarmappable(self):
+    def _update_scalarmappable(self):
         """Update colors from the scalar mappable array, if it is not None."""
         marked_obj_ids = list(self._marked_obj.keys())
         self._proxy_props = {oid: {} for oid in marked_obj_ids}
@@ -1218,7 +1239,6 @@ class _Tag(cm.ScalarMappable):
         _first_mappable = cbook.safe_first_element(_mappable_array)
         if isinstance(_first_mappable, datetime):
             _mappable_array = date2num(_mappable_array)
-        print('mappable', _mappable_array)
         self.set_array(_mappable_array)
         if self._A is None:
             return
@@ -1251,9 +1271,6 @@ class _Tag(cm.ScalarMappable):
 
     def register_proxy(self, proxy):
         """TODO: write docstring."""
-        if self._closed:
-            # TODO: a closed tag can no longer be used to tag a proxy
-            raise Exception()
         proxy_id = id(proxy)
         if proxy_id in self._marked_obj:
             # if the proxy was already registered, ignore it
@@ -1262,23 +1279,26 @@ class _Tag(cm.ScalarMappable):
         # self._kwargs.update(kw)
         if self._mappable is not None:
             self._mappables[proxy_id] = getattr(proxy, f'get_{self._mappable}')()
+            self.stale = True
         # remember the proxy
         self._marked_obj[proxy_id] = proxy
 
     def deregister_proxy(self, proxy):
         proxy_id = id(proxy)
         self._marked_obj.pop(id(proxy))
-        self._A.pop(proxy_id)
+        if self._mappable is not None:
+            self.stale = True
+            self._mappables.pop(proxy_id)
 
     def _prepare_props(self):
         self._proxy_props = {}
         if self._mappable is not None:
-            self.update_scalarmappable()
+            self._update_scalarmappable()
+        self.stale = False
 
-    # TODO: unfinished (not updated)
     # TODO: uncomment once in mpl
     # @docstring.dedent_interpd
-    def style(self, **props):
+    def set(self, **props):
         """
         Setting the styling properties associated to this tag.
 
@@ -1299,26 +1319,16 @@ class _Tag(cm.ScalarMappable):
         self.set_norm(props.pop('norm', None))
         # TODO: set a global default for the mappable
         self._mappable = props.pop('mappable', None)
+        if self._mappable is not None:
+            self.stale = True
         self._props = props
 
-    def close(self):
-        """This method closes the tag for registration."""
-        self._prepare_props()
-        self._closed = True
-
-    @property
-    def is_closed(self,):
-        return self._closed
-
-    def get_props(self, proxy_id):
-        """TODO: write docstring."""
-        if not self._closed:
-            self.close()
-        # props = cbook.normalize_kwargs(self._props, proxy._artistcls)
-        # if self.cmap is not None:
-        #     fc = self._get_
+    def get_props(self, obj_id):
+        """Return the properties specific to an object_id."""
+        if self.stale:
+            self._prepare_props()
         props = dict(self._props)
-        props.update(self._proxy_props.get(proxy_id, {}))
+        props.update(self._proxy_props.get(obj_id, {}))
         return props
 
 
@@ -1651,16 +1661,6 @@ class SubDiagram:
                     # self._pairwise_swapping(col_id)
                     raise NotImplementedError("The optimized layout is not yet"
                                               " implemented")
-            # _min_y = min(self._columns[col_id],
-            #              key=lambda x: x.get_y()).get_y() - 2 * col_hspace
-            # _max_y_cluster = max(self._columns[col_id],
-            #                      key=lambda x: x.get_y() + x.get_height())
-            # _max_y = _max_y_cluster.get_y() + \
-            #     _max_y_cluster.get_height() + 2 * col_hspace
-            # self._ymin = min(self._ymin,
-            #                  _min_y) if self._ymin is not None else _min_y
-            # self._ymax = max(self._ymax,
-            #                  _max_y) if self._ymax is not None else _max_y
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
@@ -1850,11 +1850,13 @@ class SubDiagram:
             self.generate_layout()
         _kwargs = dict(kwargs)
         _kwargs.update(self._kwargs)
+        # first create the blocks
         _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
         self._blocks.create_artist(ax=ax, **_blockkws)
         self._blocks.add_artist_to_axes(ax)
         for block in self._blocks:
             block.handle_flows()
+        # then create the flows
         _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
         self._flows.create_artist(ax=ax, **_flowkws)
         self._flows.add_artist_to_axes(ax)
@@ -2387,6 +2389,7 @@ class Alluvial:
             _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
             self._xlim = _update_limits(self._xlim, _xmin, _xmax)
             self._ylim = _update_limits(self._ylim, _ymin, _ymax)
+        # TODO: finally initiate all flows in _cross_flows
 
     def _collect_x_positions(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
@@ -2406,7 +2409,6 @@ class Alluvial:
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')
         x_positions = self._collect_x_positions()
-        print('locator', x_positions)
         x0 = cbook.safe_first_element(x_positions)
         if isinstance(x0, datetime):
             majloc = self.ax.xaxis.set_major_locator(AutoDateLocator())
@@ -2449,7 +2451,7 @@ class Alluvial:
             )
             return None
         # self._tags[label] = _Tag(label=label, **kwargs)
-        self._tags[label].style(**kwargs)
+        self._tags[label].set(**kwargs)
         return self._tags[label]
 
     def select_by_label(self, label):
@@ -2536,9 +2538,6 @@ class Alluvial:
         """
         if isinstance(tag, str):
             tag = self._tags[tag]  # this creates a new tag if it did not exist
-        if tag.is_closed:
-            # TODO: add some info to why this tag might be closed
-            raise Exception('A closed tag cannot be used on tag blocks')
         blocks = self.select_blocks(*args)
         for block in blocks:
             block.add_tag(tag)

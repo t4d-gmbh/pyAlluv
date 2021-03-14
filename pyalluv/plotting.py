@@ -107,7 +107,7 @@ def _update_limits(limits, newmin, newmax):
     return min(omin, newmin), max(omax, newmax)
 
 
-def _normalize_selector(selector):
+def _separate_selector(selector):
     """TODO: write docstring"""
     nbr_args = len(selector)
     # convert all input to slices
@@ -459,9 +459,9 @@ class _Block(_ArtistProxy):
         self._inflows = []
         self._label = label
         self.label_margin = label_margin
-        # TODO: replace dict with list
-        self.in_margin = {'bottom': 0, 'top': 0}
-        self.out_margin = {'bottom': 0, 'top': 0}
+        self._to_margin_index = lambda x: 0 if x <= 0 else 1
+        _yz = self._height - self._height  # create the neutral element
+        self._margins = [[_yz, _yz], [_yz, _yz]]  # out(b[ottom],t[op]),in(b,t)
 
     # getters and setters from attached artist
     def get_x(self):
@@ -696,6 +696,8 @@ class _Block(_ArtistProxy):
         """TODO: write docstring."""
         self._inflows.append(inflow)
 
+    # ###
+    # class specific methods for create_artist:
     def _pre_creation(self, ax=None, **kwargs):
         if self._width is None:
             try:
@@ -712,50 +714,26 @@ class _Block(_ArtistProxy):
 
     def _post_creation(self, ax=None):
         self.handle_flows()
+    # ###
 
     def _set_loc_out_flows(self,):
         """
-        Determine fore all outgoing flows if they should be attached on top
-        or at the bottom.
+        Advise all outgoing flows to determine their preferred anchor locations
         """
-        yc = self.get_yc()
         for out_flow in self._outflows:
-            in_loc = None
-            out_loc = None
-            if out_flow.target is not None:
-                t_yc = out_flow.target.get_yc()
-                t_height = out_flow.target.get_height()
-                # target_inloc = out_flow.target.get_inloc()
-                if yc > t_yc:
-                    in_loc = 'top'  # draw to top
-                    # if yc >= target_inloc['top'][1]:
-                    if yc >= t_yc + 0.5 * t_height:
-                        out_loc = 'bottom'  # draw from bottom to in top
-                    else:
-                        out_loc = 'top'  # draw from top to top
-                else:
-                    in_loc = 'bottom'  # draw to bottom
-                    # if yc <= target_inloc['bottom'][1]:
-                    if yc <= t_yc - 0.5 * t_height:
-                        out_loc = 'top'  # draw from top to bottom
-                    else:
-                        out_loc = 'bottom'  # draw form bottom to bottom
-            else:
-                out_flow.out_loc = out_flow.out_flow_vanish
-            out_flow.in_loc = in_loc
-            out_flow.out_loc = out_loc
+            out_flow.determine_preferred_anchors()
 
     def _sort_out_flows(self,):
         """TODO: write docstring."""
         _top_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
-            if self._outflows[i].out_loc == 'top'
+            if self._outflows[i].out_loc > 0  # i.e. top
         ]
         _bottom_flows = [
             (i, self._outflows[i])
             for i in range(len(self._outflows))
-            if self._outflows[i].out_loc == 'bottom'
+            if self._outflows[i].out_loc < 0  # i.e. bottom
         ]
         if _top_flows:
             sorted_top_idx, _flows_top = zip(*sorted(
@@ -787,12 +765,12 @@ class _Block(_ArtistProxy):
         _top_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
-            if self._inflows[i].in_loc == 'top'
+            if self._inflows[i].in_loc > 0  # i.e. top
         ]
         _bottom_flows = [
             (i, self._inflows[i])
             for i in range(len(self._inflows))
-            if self._inflows[i].in_loc == 'bottom'
+            if self._inflows[i].in_loc < 0  # i.e. bottom
         ]
         if _top_flows:
             sorted_top_idx, _flows_top = zip(*sorted(
@@ -821,23 +799,35 @@ class _Block(_ArtistProxy):
 
     def get_loc_out_flow(self, flow_width, out_loc, in_loc):
         """TODO: write docstring."""
-        outloc = self.get_outloc()
-        anchor_out = (
-            outloc[out_loc][0],
-            outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'bottom' else 0)
-        )
-        top_out = (
-            outloc[out_loc][0],
-            outloc[out_loc][1] + self.out_margin[out_loc] + (flow_width if in_loc == 'top' else 0)
-        )
-        self.out_margin[out_loc] += flow_width
+        o_loc = self.get_corner(True, out_loc)
+        o_margin = self.get_margin(True, out_loc)
+        anchor_out = (o_loc[0],
+                      o_loc[1] + o_margin + (flow_width if in_loc < 0 else 0))
+        top_out = (o_loc[0],
+                   o_loc[1] + o_margin + (flow_width if in_loc > 0 else 0))
+        self.update_margin(True, out_loc, flow_width)
         return anchor_out, top_out
+
+    def get_loc_in_flow(self, flow_width, out_loc, in_loc):
+        """TODO: write docstring."""
+        inloc = self.get_corner(False, in_loc)
+        i_margin = self.get_margin(False, in_loc)
+        anchor_in = (
+            inloc[0],
+            inloc[1] + i_margin + (flow_width if out_loc < 0 else 0)
+        )
+        top_in = (
+            inloc[0],
+            inloc[1] + i_margin + (flow_width if out_loc > 0 else 0)
+        )
+        self.update_margin(False, in_loc, flow_width)
+        return anchor_in, top_in
 
     def _set_anchor_out_flows(self,):
         """TODO: write docstring."""
         for out_flow in self._outflows:
             out_width = out_flow.flow \
-                if out_flow.out_loc == 'bottom' else - out_flow.flow
+                if out_flow.out_loc < 0 else - out_flow.flow
             out_flow.anchor_out, out_flow.top_out = self.get_loc_out_flow(
                 out_width, out_flow.out_loc, out_flow.in_loc
             )
@@ -846,38 +836,48 @@ class _Block(_ArtistProxy):
         """TODO: write docstring."""
         for in_flow in self._inflows:
             in_width = in_flow.flow \
-                if in_flow.in_loc == 'bottom' else - in_flow.flow
+                if in_flow.in_loc < 0 else - in_flow.flow
             in_flow.anchor_in, in_flow.top_in = self.get_loc_in_flow(
                 in_width, in_flow.out_loc, in_flow.in_loc
             )
 
-    def get_loc_in_flow(self, flow_width, out_loc, in_loc):
-        """TODO: write docstring."""
-        inloc = self.get_inloc()
-        anchor_in = (
-            inloc[in_loc][0],
-            inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'bottom' else 0)
-        )
-        top_in = (
-            inloc[in_loc][0],
-            inloc[in_loc][1] + self.in_margin[in_loc] + (flow_width if out_loc == 'top' else 0)
-        )
-        self.in_margin[in_loc] += flow_width
-        return anchor_in, top_in
+    def get_corner(self, out=False, preferred: int = 0) -> tuple:
+        """
+        Returns a corner of the block. If *out* is false (default) a corner
+        from the left side is returned, otherwise the corner will be from the
+        right side. Depending on the preference passed in *preferred* either
+        the top or bottom corner is selected.
 
-    def get_inloc(self,):
-        """TODO: write docstring."""
-        # TODO: dont use dict here.
-        # NOTE: This only works when using _expose_artist_getters_and_setters
-        x0, y0, width, height = self.get_bbox().bounds
-        return {'bottom': (x0, y0),  # left, bottom
-                'top': (x0, y0 + height)}  # left, top
+        Parameters
+        ----------
+        preferred : int
+            Preferences are encoded as +/-: top/bottom; 2 is high priority, 1
+            is low priority and 0 is no preference at all.
+        """
+        x0, y, width, height = self.get_bbox().bounds
+        x = x0 + width if out else x0
+        if preferred > 0:  # get the top
+            y += height
+        return (x, y)
 
-    def get_outloc(self,):
-        """TODO: write docstring."""
-        x0, y0, width, height = self.get_bbox().bounds
-        return {'top': (x0 + width, y0 + height),  # top right
-                'bottom': (x0 + width, y0)}  # right, bottom
+    def get_margin(self, out=False, location=0):
+        """
+        Get the current vertical margin for a corner.
+        The corner is selected based on *out* and *location* (see
+        :meth:`get_corner` for details). The margin gives the space that is
+        already occupied by attached flows.
+        """
+        _margin = self._margins[self._to_margin_index(out)]
+        #_margin = self._out_margin if out else self._in_margin
+        return _margin[self._to_margin_index(location)]
+
+    def update_margin(self, out: bool, location: int, change):
+        """
+        Increase a corner margin by the amount given in *change*.
+        """
+        _margin = self._margins[self._to_margin_index(out)]
+        #_margin = self._out_margin if out else self._in_margin
+        _margin[self._to_margin_index(location)] += change
 
     def handle_flows(self,):
         """TODO: write docstring."""
@@ -928,8 +928,12 @@ class _Flow(_ArtistProxy):
         # TODO: Is this really needed?
         self._original_flow = flow
         self.flow = flow
-        self.out_loc = None
-        self.in_loc = None
+        self.out_loc = 0  # +/-: top/bottom,  2: high prio, 1: low prio
+        self.in_loc = 0   # +/-: top/bottom,  2: high prio, 1: low prio
+        self.top_out = None
+        self.top_in = None
+        self.anchor_out = None
+        self._anchor_in = None
         # attach the flow to the source and target blocks
         if self.source is not None:
             self.source.add_outflow(self)
@@ -943,14 +947,33 @@ class _Flow(_ArtistProxy):
         _tx0, _ty0, twidth, _theight = self.target.get_bbox().bounds
         return swidth, twidth
 
+    def determine_preferred_anchors(self,):
+        """Determine the preferred anchor positions on source and target"""
+        # needed: s_y0, s_y1, s_yc, t_yc
+        s_yc = self.source.get_yc()
+        s_hh = 0.5 * self.source.get_height()
+        s_y0, s_y1 = s_yc - s_hh, s_yc + s_hh
+        t_yc = self.target.get_yc()
+        if s_y1 < t_yc:
+            self.out_loc, self.in_loc = 2, -2
+        else:
+            if s_y0 > t_yc:
+                self.out_loc, self.in_loc = -2, 2
+            else:
+                # low priority only
+                if s_yc < t_yc:
+                    self.out_loc, self.in_loc = 1, -1
+                else:
+                    self.out_loc, self.in_loc = -1, 1
+
     def _init_artist(self, ax):
         """TODO: write docstring."""
         swidth, twidth = self._get_widths()
         _dist = None
-        if self.out_loc is not None:
-            if self.in_loc is not None:
-                _dist = 2 / 3 * (self.target.get_inloc()['bottom'][0] -
-                                 self.source.get_outloc()['bottom'][0])
+        if self.out_loc:
+            if self.in_loc:
+                _dist = 2 / 3 * (self.target.get_corner(False, 1)[0] -
+                                 self.source.get_corner(True, -1)[0])
             else:
                 _dist = 2 * swidth
             if self.in_loc is not None:
@@ -2412,7 +2435,7 @@ class Alluvial:
         # select the subdiagrams
         # monitor stale of these subds
         # for each pass rest of selector and kwargs
-        subdselect, colselect, blockselect = _normalize_selector(selector)
+        subdselect, colselect, blockselect = _separate_selector(selector)
         _subd_stale = False
         for diagram in self._diagrams[subdselect]:
             is_stale = diagram.update_blocks(colselect, blockselect, **kwargs)
@@ -2451,7 +2474,7 @@ class Alluvial:
         Therefore, `select_blocks` might be difficult to use on columns with
         the layouts `'centered'` and `'optimized'`.
         """
-        subdselect, colselect, blockselect = _normalize_selector(selector)
+        subdselect, colselect, blockselect = _separate_selector(selector)
         blocks = []
         for diagram in self._diagrams[subdselect]:
             for col in diagram[colselect]:

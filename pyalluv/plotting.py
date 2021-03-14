@@ -741,10 +741,10 @@ class _Block(_ArtistProxy):
         t_loc = in_pref if out else out_pref  # preferred location there
         loc = self.get_corner(out, h_loc)
         margin = self.get_margin(out, h_loc)
-        anchor = (loc[0], loc[1] + margin + (width if t_loc < 0 else 0))
+        bottom = (loc[0], loc[1] + margin + (width if t_loc < 0 else 0))
         top = (loc[0], loc[1] + margin + (width if t_loc > 0 else 0))
         self._update_margin(out, h_loc, width)
-        return anchor, top
+        return bottom, top
 
     def get_corner(self, out=False, preferred: int = 0) -> tuple:
         """
@@ -803,7 +803,12 @@ class _Block(_ArtistProxy):
                                  if tif[self_loc_idx] == pref][::_order])
         self.set_flows(out, [flows[i] for i in new_ordering])
 
-    def _set_anchor_for_flows(self, out: bool):
+    def _set_flow_locations(self, out: bool):
+        """
+        For all flows (either out going - if *out* is True, or incoming) set
+        the corner locations. The corner of a flow is either the left- or
+        right-most horizontal line define by the top and bottom points.
+        """
         for flow in self.get_flows(out):
             width = flow.flow * (1 if flow.get_pref(out) < 0 else -1)
             out_pref, in_pref = flow.get_prefs()
@@ -816,7 +821,7 @@ class _Block(_ArtistProxy):
             out_flow.update_prefs()
         for out in [True, False]:  # process both in and out flows
             self._sort_flows(out)
-            self._set_anchor_for_flows(out)
+            self._set_flow_locations(out)
 
 
 @_expose_artist_getters_and_setters
@@ -861,8 +866,8 @@ class _Flow(_ArtistProxy):
         self.flow = flow
         self._out_pref = 0  # +/-: top/bottom,  2: high prio, 1: low prio
         self._in_pref = 0   # +/-: top/bottom,  2: high prio, 1: low prio
-        self._top_in, self._top_out = None, None
-        self._anchor_in, self._anchor_out = None, None
+        self._xy1_in, self._xy1_out = None, None
+        self._xy0_in, self._xy0_out = None, None
         # attach the flow to the source and target blocks
         if self.source is not None:
             self.source.add_outflow(self)
@@ -888,19 +893,19 @@ class _Flow(_ArtistProxy):
         """Get the preferred attach location on source (if *out*) or target."""
         return self._out_pref if out else self._in_pref
 
-    def set_locations(self, out: bool, anchor, top):
+    def set_locations(self, out: bool, bottom, top):
         """
-        Set the anchor ant top location. Note that the anchor is the lower
+        Set the bottom and top location. Note that the bottom is the lower
         corner while top is the upper corner. If *out* is set to `True` then
-        the provided *anchor* and *top* define the limits on the left side of
+        the provided *bottom* and *top* define the limits on the left side of
         the flow and if *out* is `False` the right side.
         """
         if out:
-            self._anchor_out = anchor
-            self._top_out = top
+            self._xy0_out = bottom
+            self._xy1_out = top
         else:
-            self._anchor_in = anchor
-            self._top_in = top
+            self._xy0_in = bottom
+            self._xy1_in = top
 
     def _get_block_widths(self,):
         """Return the dimensions (width and height) of the linked Proxies."""
@@ -945,37 +950,35 @@ class _Flow(_ArtistProxy):
         # ###
         # TODO: This can be shortened
         # now complete the path points
-        print(self._anchor_out, self._anchor_in)
-        if self._anchor_out is not None:
-            anchor_out_inner = (self._anchor_out[0] - 0.5 * swidth,
-                                self._anchor_out[1])
-            dir_out_anchor = (self._anchor_out[0] + _dist, self._anchor_out[1])
+        print(self._xy0_out, self._xy0_in)
+        if self._xy0_out is not None:
+            xy0_out_inner = (self._xy0_out[0] - 0.5 * swidth, self._xy0_out[1])
+            dir_out_xy0 = (self._xy0_out[0] + _dist, self._xy0_out[1])
         else:
             # TODO set to form vanishing flow
-            # anchor_out = anchor_out_inner =
-            # dir_out_anchor =
+            # xy0_out = xy0_out_inner =
+            # dir_out_xy0 =
             pass
-        if self._top_out is not None:
-            top_out_inner = (self._top_out[0] - 0.5 * swidth, self._top_out[1])
+        if self._xy1_out is not None:
+            top_out_inner = (self._xy1_out[0] - 0.5 * swidth, self._xy1_out[1])
             # 2nd point 2/3 of distance between clusters
-            dir_out_top = (self._top_out[0] + _dist, self._top_out[1])
+            dir_out_top = (self._xy1_out[0] + _dist, self._xy1_out[1])
         else:
             # TODO set to form vanishing flow
             # top_out = top_out_inner =
             # dir_out_top =
             pass
-        if self._anchor_in is not None:
-            anchor_in_inner = (self._anchor_in[0] + 0.5 * twidth,
-                               self._anchor_in[1])
-            dir_in_anchor = (self._anchor_in[0] - _dist, self._anchor_in[1])
+        if self._xy0_in is not None:
+            xy0_in_inner = (self._xy0_in[0] + 0.5 * twidth, self._xy0_in[1])
+            dir_in_xy0 = (self._xy0_in[0] - _dist, self._xy0_in[1])
         else:
             # TODO set to form new in flow
-            # anchor_in = anchor_in_inner =
-            # dir_in_anchor =
+            # xy0_in = xy0_in_inner =
+            # dir_in_xy0 =
             pass
-        if self._top_in is not None:
-            top_in_inner = (self._top_in[0] + 0.5 * twidth, self._top_in[1])
-            dir_in_top = (self._top_in[0] - _dist, self._top_in[1])
+        if self._xy1_in is not None:
+            top_in_inner = (self._xy1_in[0] + 0.5 * twidth, self._xy1_in[1])
+            dir_in_top = (self._xy1_in[0] - _dist, self._xy1_in[1])
         else:
             # TODO set to form new in flow
             # top_in = top_in_inner =
@@ -983,11 +986,11 @@ class _Flow(_ArtistProxy):
             pass
         # ###
 
-        vertices = [self._anchor_out, dir_out_anchor, dir_in_anchor,
-                    self._anchor_in, anchor_in_inner, top_in_inner, self._top_in,
-                    dir_in_top, dir_out_top, self._top_out, top_out_inner,
-                    anchor_out_inner]
-        # , self._anchor_out]
+        vertices = [self._xy0_out, dir_out_xy0, dir_in_xy0,
+                    self._xy0_in, xy0_in_inner, top_in_inner, self._xy1_in,
+                    dir_in_top, dir_out_top, self._xy1_out, top_out_inner,
+                    xy0_out_inner]
+        # , self._xy0_out]
         codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4,
                  Path.LINETO, Path.LINETO, Path.LINETO, Path.CURVE4,
                  Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO]

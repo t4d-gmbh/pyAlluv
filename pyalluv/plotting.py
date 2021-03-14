@@ -614,28 +614,28 @@ class _Block(_ArtistProxy):
         """Set the vertical alignment of the anchor point and the block."""
         self._set_verticalalignment(align)
 
-    def get_anchor(self,):
-        """Return the anchor point of the block."""
-        return self._anchor
+    # def get_anchor(self,):
+    #     """Return the anchor point of the block."""
+    #     return self._anchor
 
-    def get_center(self,):
-        """Return the center point of the block."""
-        return (self.get_xc(),
-                self.get_yc())
+    # def get_center(self,):
+    #     """Return the center point of the block."""
+    #     return (self.get_xc(),
+    #             self.get_yc())
 
-    def set_xa(self, xa):
-        """Set the x coordinate of the anchor point."""
-        self._xa = xa
-        self.stale = True
+    # def set_xa(self, xa):
+    #     """Set the x coordinate of the anchor point."""
+    #     self._xa = xa
+    #     self.stale = True
 
-    def set_ya(self, ya):
-        """Set the y coordinate of the anchor point."""
-        self._ya = ya
-        self.stale = True
+    # def set_ya(self, ya):
+    #     """Set the y coordinate of the anchor point."""
+    #     self._ya = ya
+    #     self.stale = True
 
-    def set_xc(self, xc):
-        # TODO: however, not sure if this is really needed.
-        raise NotImplementedError('TODO')
+    # def set_xc(self, xc):
+    #     # TODO: however, not sure if this is really needed.
+    #     raise NotImplementedError('TODO')
 
     def set_yc(self, yc):
         """
@@ -649,29 +649,43 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += 0.5 * self._height
 
+    def get_flows(self, out=False):
+        if out:
+            return self._outflows
+        else:
+            return self._inflows
+
+    def set_flows(self, out, flows):
+        if out:
+            self._outflows = flows
+        else:
+            self._inflows = flows
+
+    # TODO: this is partial of get_flows
     def get_outflows(self):
         """Return a list of outgoing `._Flows`."""
         return self._outflows
 
+    # TODO: this is partial of get_flows
     def get_inflows(self):
         """Return a list of incoming `._Flows`."""
         return self._inflows
 
-    def set_outflows(self, outflows):
-        """TODO: write docstring."""
-        self._outflows = outflows
+    # def set_outflows(self, outflows):
+    #     """TODO: write docstring."""
+    #     self._outflows = outflows
 
-    def set_inflows(self, inflows):
-        """TODO: write docstring."""
-        self._inflows = inflows
+    # def set_inflows(self, inflows):
+    #     """TODO: write docstring."""
+    #     self._inflows = inflows
 
     # xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
     # ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
     # y = property(get_y, set_y, doc="The y coordinate of the block bottom")
     # x = property(get_x, None, doc="The x coordinate of the block bottom")
-    inflows = property(get_inflows, set_inflows,
+    inflows = property(get_inflows, None,  # set_inflows,
                        doc="List of `._Flow` objects entering the block.")
-    outflows = property(get_outflows, set_outflows,
+    outflows = property(get_outflows, None,  # set_outflows,
                         doc="List of `._Flow` objects leaving the block.")
 
     def get_xlim(self,):
@@ -716,86 +730,24 @@ class _Block(_ArtistProxy):
         self.handle_flows()
     # ###
 
-    def _set_loc_out_flows(self,):
-        """
-        Advise all outgoing flows to determine their preferred anchor locations
-        """
-        for out_flow in self._outflows:
-            out_flow.determine_preferred_anchors()
-
-    def _sort_out_flows(self,):
-        """TODO: write docstring."""
-        _top_flows = [
-            (i, self._outflows[i])
-            for i in range(len(self._outflows))
-            if self._outflows[i].out_loc > 0  # i.e. top
-        ]
-        _bottom_flows = [
-            (i, self._outflows[i])
-            for i in range(len(self._outflows))
-            if self._outflows[i].out_loc < 0  # i.e. bottom
-        ]
-        if _top_flows:
-            sorted_top_idx, _flows_top = zip(*sorted(
-                _top_flows,
-                key=lambda x: x[1].target.get_yc()
-                if x[1].target
-                # TODO: this should not simply be -10000
-                else -10000,
-                reverse=True
-            ))
-        else:
-            sorted_top_idx = []
-        if _bottom_flows:
-            sorted_bottom_idx, _flows_bottom = zip(*sorted(
-                _bottom_flows,
-                key=lambda x: x[1].target.get_yc()
-                if x[1].target
-                # TODO: this should not simply be -10000
-                else -10000,
-                reverse=False
-            ))
-        else:
-            sorted_bottom_idx = []
-        sorted_idx = list(sorted_top_idx) + list(sorted_bottom_idx)
-        self._outflows = [self._outflows[i] for i in sorted_idx]
-
-    def _sort_in_flows(self,):
-        """TODO: write docstring."""
-        _top_flows = [
-            (i, self._inflows[i])
-            for i in range(len(self._inflows))
-            if self._inflows[i].in_loc > 0  # i.e. top
-        ]
-        _bottom_flows = [
-            (i, self._inflows[i])
-            for i in range(len(self._inflows))
-            if self._inflows[i].in_loc < 0  # i.e. bottom
-        ]
-        if _top_flows:
-            sorted_top_idx, _flows_top = zip(*sorted(
-                _top_flows,
-                key=lambda x: x[1].source.get_yc()
-                if x[1].source
-                # TODO: this should not simply be -10000
-                else -10000,
-                reverse=True
-            ))
-        else:
-            sorted_top_idx = []
-        if _bottom_flows:
-            sorted_bottom_idx, _flows_bottom = zip(*sorted(
-                _bottom_flows,
-                key=lambda x: x[1].source.get_yc()
-                if x[1].source
-                # TODO: this should not simply be -10000
-                else -10000,
-                reverse=False
-            ))
-        else:
-            sorted_bottom_idx = []
-        sorted_idx = list(sorted_top_idx) + list(sorted_bottom_idx)
-        self._inflows = [self._inflows[i] for i in sorted_idx]
+    def _sort_flows(self, out=False):
+        # _inv_layout = True if layout == 'top' else False
+        flows = self.get_flows(out)
+        if not flows:
+            return None
+        other = 'target' if out else 'source'
+        self_loc_idx = 1 if out else 2
+        yc = self.get_yc()
+        flow_infos = [(i, of.out_loc, of.in_loc, getattr(of, other).get_yc(),
+                       of.flow) for i, of in enumerate(flows)]
+        flow_infos = sorted(flow_infos, key=lambda x: (x[3] - yc))
+        new_ordering = []
+        for pref in [2, -2, 1, -1, 0]:  # prio. ordered (top bottom within)
+            _order = (-1 if pref > 0 else 1)  # * (-1 if _inv_layout else 1)
+            new_ordering.extend([tif[0]
+                                 for tif in flow_infos
+                                 if tif[self_loc_idx] == pref][::_order])
+        self.set_flows(out, [flows[i] for i in new_ordering])
 
     def get_loc_out_flow(self, flow_width, out_loc, in_loc):
         """TODO: write docstring."""
@@ -868,7 +820,7 @@ class _Block(_ArtistProxy):
         already occupied by attached flows.
         """
         _margin = self._margins[self._to_margin_index(out)]
-        #_margin = self._out_margin if out else self._in_margin
+        # _margin = self._out_margin if out else self._in_margin
         return _margin[self._to_margin_index(location)]
 
     def update_margin(self, out: bool, location: int, change):
@@ -876,14 +828,15 @@ class _Block(_ArtistProxy):
         Increase a corner margin by the amount given in *change*.
         """
         _margin = self._margins[self._to_margin_index(out)]
-        #_margin = self._out_margin if out else self._in_margin
+        # _margin = self._out_margin if out else self._in_margin
         _margin[self._to_margin_index(location)] += change
 
     def handle_flows(self,):
         """TODO: write docstring."""
-        self._set_loc_out_flows()
-        self._sort_in_flows()
-        self._sort_out_flows()
+        for out_flow in self._outflows:
+            out_flow.determine_preferred_anchors()
+        self._sort_flows(out=False)  # sorting inflows
+        self._sort_flows(out=True)   # sorting outflows
         self._set_anchor_in_flows()
         self._set_anchor_out_flows()
 
@@ -2439,7 +2392,7 @@ class Alluvial:
         _subd_stale = False
         for diagram in self._diagrams[subdselect]:
             is_stale = diagram.update_blocks(colselect, blockselect, **kwargs)
-            # TODO: YOU ARE HERE
+            # TODO: this is likely not done...
             _subd_stale = _subd_stale or is_stale
 
     def select_blocks(self, *selector):

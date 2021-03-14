@@ -730,68 +730,21 @@ class _Block(_ArtistProxy):
         self.handle_flows()
     # ###
 
-    def _sort_flows(self, out=False):
-        # _inv_layout = True if layout == 'top' else False
-        flows = self.get_flows(out)
-        if not flows:
-            return None
-        other = 'target' if out else 'source'
-        self_loc_idx = 1 if out else 2
-        yc = self.get_yc()
-        flow_infos = [(i, of.out_loc, of.in_loc, getattr(of, other).get_yc(),
-                       of.flow) for i, of in enumerate(flows)]
-        flow_infos = sorted(flow_infos, key=lambda x: (x[3] - yc))
-        new_ordering = []
-        for pref in [2, -2, 1, -1, 0]:  # prio. ordered (top bottom within)
-            _order = (-1 if pref > 0 else 1)  # * (-1 if _inv_layout else 1)
-            new_ordering.extend([tif[0]
-                                 for tif in flow_infos
-                                 if tif[self_loc_idx] == pref][::_order])
-        self.set_flows(out, [flows[i] for i in new_ordering])
+    def _request_loc(self, out: bool, width, out_pref, in_pref):
+        """
+        Get the anchor ant top for a flow a flow with a certain with and
+        location preferences.
 
-    def get_loc_out_flow(self, flow_width, out_loc, in_loc):
-        """TODO: write docstring."""
-        o_loc = self.get_corner(True, out_loc)
-        o_margin = self.get_margin(True, out_loc)
-        anchor_out = (o_loc[0],
-                      o_loc[1] + o_margin + (flow_width if in_loc < 0 else 0))
-        top_out = (o_loc[0],
-                   o_loc[1] + o_margin + (flow_width if in_loc > 0 else 0))
-        self.update_margin(True, out_loc, flow_width)
-        return anchor_out, top_out
-
-    def get_loc_in_flow(self, flow_width, out_loc, in_loc):
-        """TODO: write docstring."""
-        inloc = self.get_corner(False, in_loc)
-        i_margin = self.get_margin(False, in_loc)
-        anchor_in = (
-            inloc[0],
-            inloc[1] + i_margin + (flow_width if out_loc < 0 else 0)
-        )
-        top_in = (
-            inloc[0],
-            inloc[1] + i_margin + (flow_width if out_loc > 0 else 0)
-        )
-        self.update_margin(False, in_loc, flow_width)
-        return anchor_in, top_in
-
-    def _set_anchor_out_flows(self,):
-        """TODO: write docstring."""
-        for out_flow in self._outflows:
-            out_width = out_flow.flow \
-                if out_flow.out_loc < 0 else - out_flow.flow
-            out_flow.anchor_out, out_flow.top_out = self.get_loc_out_flow(
-                out_width, out_flow.out_loc, out_flow.in_loc
-            )
-
-    def _set_anchor_in_flows(self,):
-        """TODO: write docstring."""
-        for in_flow in self._inflows:
-            in_width = in_flow.flow \
-                if in_flow.in_loc < 0 else - in_flow.flow
-            in_flow.anchor_in, in_flow.top_in = self.get_loc_in_flow(
-                in_width, in_flow.out_loc, in_flow.in_loc
-            )
+        Note that the anchor is the lower corner while top is the upper corner.
+        """
+        h_loc = out_pref if out else in_pref  # preferred location here
+        t_loc = in_pref if out else out_pref  # preferred location there
+        loc = self.get_corner(out, h_loc)
+        margin = self.get_margin(out, h_loc)
+        anchor = (loc[0], loc[1] + margin + (width if t_loc < 0 else 0))
+        top = (loc[0], loc[1] + margin + (width if t_loc > 0 else 0))
+        self._update_margin(out, h_loc, width)
+        return anchor, top
 
     def get_corner(self, out=False, preferred: int = 0) -> tuple:
         """
@@ -823,7 +776,7 @@ class _Block(_ArtistProxy):
         # _margin = self._out_margin if out else self._in_margin
         return _margin[self._to_margin_index(location)]
 
-    def update_margin(self, out: bool, location: int, change):
+    def _update_margin(self, out: bool, location: int, change):
         """
         Increase a corner margin by the amount given in *change*.
         """
@@ -831,14 +784,39 @@ class _Block(_ArtistProxy):
         # _margin = self._out_margin if out else self._in_margin
         _margin[self._to_margin_index(location)] += change
 
+    def _sort_flows(self, out: bool):
+        # _inv_layout = True if layout == 'top' else False
+        flows = self.get_flows(out)
+        if not flows:
+            return None
+        other = 'target' if out else 'source'
+        self_loc_idx = 1 if out else 2
+        yc = self.get_yc()
+        flow_infos = [(i, *of.get_prefs(), getattr(of, other).get_yc())
+                      for i, of in enumerate(flows)]
+        flow_infos = sorted(flow_infos, key=lambda x: (x[3] - yc))
+        new_ordering = []
+        for pref in [2, -2, 1, -1, 0]:  # prio. ordered (top bottom within)
+            _order = (-1 if pref > 0 else 1)  # * (-1 if _inv_layout else 1)
+            new_ordering.extend([tif[0]
+                                 for tif in flow_infos
+                                 if tif[self_loc_idx] == pref][::_order])
+        self.set_flows(out, [flows[i] for i in new_ordering])
+
+    def _set_anchor_for_flows(self, out: bool):
+        for flow in self.get_flows(out):
+            width = flow.flow * (1 if flow.get_pref(out) < 0 else -1)
+            out_pref, in_pref = flow.get_prefs()
+            flow.set_locations(out, *self._request_loc(out, width, out_pref,
+                                                       in_pref))
+
     def handle_flows(self,):
         """TODO: write docstring."""
         for out_flow in self._outflows:
-            out_flow.determine_preferred_anchors()
-        self._sort_flows(out=False)  # sorting inflows
-        self._sort_flows(out=True)   # sorting outflows
-        self._set_anchor_in_flows()
-        self._set_anchor_out_flows()
+            out_flow.update_prefs()
+        for out in [True, False]:  # process both in and out flows
+            self._sort_flows(out)
+            self._set_anchor_for_flows(out)
 
 
 @_expose_artist_getters_and_setters
@@ -881,12 +859,10 @@ class _Flow(_ArtistProxy):
         # TODO: Is this really needed?
         self._original_flow = flow
         self.flow = flow
-        self.out_loc = 0  # +/-: top/bottom,  2: high prio, 1: low prio
-        self.in_loc = 0   # +/-: top/bottom,  2: high prio, 1: low prio
-        self.top_out = None
-        self.top_in = None
-        self.anchor_out = None
-        self._anchor_in = None
+        self._out_pref = 0  # +/-: top/bottom,  2: high prio, 1: low prio
+        self._in_pref = 0   # +/-: top/bottom,  2: high prio, 1: low prio
+        self._top_in, self._top_out = None, None
+        self._anchor_in, self._anchor_out = None, None
         # attach the flow to the source and target blocks
         if self.source is not None:
             self.source.add_outflow(self)
@@ -894,13 +870,45 @@ class _Flow(_ArtistProxy):
             self.target.add_inflow(self)
         self.stale = True
 
-    def _get_widths(self,):
+    def set_prefs(self, out_pref: int, in_pref: int):
+        """
+        Set the preferred attach locations. Preferences are encoded as follows:
+
+        - Magnitude: 2 > high priority, 1 > low priority
+        - Sign: + > Attaching at the top, - > attaching at the bottom
+        """
+        self._out_pref = out_pref
+        self._in_pref = in_pref
+
+    def get_prefs(self):
+        """Get the preferred attach location on source and target block."""
+        return self._out_pref, self._in_pref
+
+    def get_pref(self, out: bool):
+        """Get the preferred attach location on source (if *out*) or target."""
+        return self._out_pref if out else self._in_pref
+
+    def set_locations(self, out: bool, anchor, top):
+        """
+        Set the anchor ant top location. Note that the anchor is the lower
+        corner while top is the upper corner. If *out* is set to `True` then
+        the provided *anchor* and *top* define the limits on the left side of
+        the flow and if *out* is `False` the right side.
+        """
+        if out:
+            self._anchor_out = anchor
+            self._top_out = top
+        else:
+            self._anchor_in = anchor
+            self._top_in = top
+
+    def _get_block_widths(self,):
         """Return the dimensions (width and height) of the linked Proxies."""
         _sx0, _sy0, swidth, _sheight = self.source.get_bbox().bounds
         _tx0, _ty0, twidth, _theight = self.target.get_bbox().bounds
         return swidth, twidth
 
-    def determine_preferred_anchors(self,):
+    def update_prefs(self,):
         """Determine the preferred anchor positions on source and target"""
         # needed: s_y0, s_y1, s_yc, t_yc
         s_yc = self.source.get_yc()
@@ -908,75 +916,78 @@ class _Flow(_ArtistProxy):
         s_y0, s_y1 = s_yc - s_hh, s_yc + s_hh
         t_yc = self.target.get_yc()
         if s_y1 < t_yc:
-            self.out_loc, self.in_loc = 2, -2
+            out_pref, in_pref = 2, -2
         else:
             if s_y0 > t_yc:
-                self.out_loc, self.in_loc = -2, 2
-            else:
-                # low priority only
+                out_pref, in_pref = -2, 2
+            else:  # low priority only
                 if s_yc < t_yc:
-                    self.out_loc, self.in_loc = 1, -1
+                    out_pref, in_pref = 1, -1
                 else:
-                    self.out_loc, self.in_loc = -1, 1
+                    out_pref, in_pref = -1, 1
+        self.set_prefs(out_pref, in_pref)
 
     def _init_artist(self, ax):
         """TODO: write docstring."""
-        swidth, twidth = self._get_widths()
+        swidth, twidth = self._get_block_widths()
         _dist = None
-        if self.out_loc:
-            if self.in_loc:
+        if self._out_pref:
+            if self._in_pref:
                 _dist = 2 / 3 * (self.target.get_corner(False, 1)[0] -
                                  self.source.get_corner(True, -1)[0])
             else:
                 _dist = 2 * swidth
-            if self.in_loc is not None:
+            if self._in_pref is not None:
                 pass
             else:
                 raise Exception('flow with neither source nor target cluster')
 
+        # ###
+        # TODO: This can be shortened
         # now complete the path points
-        print(self.anchor_out, self.anchor_in)
-        if self.anchor_out is not None:
-            anchor_out_inner = (self.anchor_out[0] - 0.5 * swidth,
-                                self.anchor_out[1])
-            dir_out_anchor = (self.anchor_out[0] + _dist, self.anchor_out[1])
+        print(self._anchor_out, self._anchor_in)
+        if self._anchor_out is not None:
+            anchor_out_inner = (self._anchor_out[0] - 0.5 * swidth,
+                                self._anchor_out[1])
+            dir_out_anchor = (self._anchor_out[0] + _dist, self._anchor_out[1])
         else:
             # TODO set to form vanishing flow
             # anchor_out = anchor_out_inner =
             # dir_out_anchor =
             pass
-        if self.top_out is not None:
-            top_out_inner = (self.top_out[0] - 0.5 * swidth, self.top_out[1])
+        if self._top_out is not None:
+            top_out_inner = (self._top_out[0] - 0.5 * swidth, self._top_out[1])
             # 2nd point 2/3 of distance between clusters
-            dir_out_top = (self.top_out[0] + _dist, self.top_out[1])
+            dir_out_top = (self._top_out[0] + _dist, self._top_out[1])
         else:
             # TODO set to form vanishing flow
             # top_out = top_out_inner =
             # dir_out_top =
             pass
-        if self.anchor_in is not None:
-            anchor_in_inner = (self.anchor_in[0] + 0.5 * twidth,
-                               self.anchor_in[1])
-            dir_in_anchor = (self.anchor_in[0] - _dist, self.anchor_in[1])
+        if self._anchor_in is not None:
+            anchor_in_inner = (self._anchor_in[0] + 0.5 * twidth,
+                               self._anchor_in[1])
+            dir_in_anchor = (self._anchor_in[0] - _dist, self._anchor_in[1])
         else:
             # TODO set to form new in flow
             # anchor_in = anchor_in_inner =
             # dir_in_anchor =
             pass
-        if self.top_in is not None:
-            top_in_inner = (self.top_in[0] + 0.5 * twidth, self.top_in[1])
-            dir_in_top = (self.top_in[0] - _dist, self.top_in[1])
+        if self._top_in is not None:
+            top_in_inner = (self._top_in[0] + 0.5 * twidth, self._top_in[1])
+            dir_in_top = (self._top_in[0] - _dist, self._top_in[1])
         else:
             # TODO set to form new in flow
             # top_in = top_in_inner =
             # dir_in_top =
             pass
+        # ###
 
-        vertices = [self.anchor_out, dir_out_anchor, dir_in_anchor,
-                    self.anchor_in, anchor_in_inner, top_in_inner, self.top_in,
-                    dir_in_top, dir_out_top, self.top_out, top_out_inner,
+        vertices = [self._anchor_out, dir_out_anchor, dir_in_anchor,
+                    self._anchor_in, anchor_in_inner, top_in_inner, self._top_in,
+                    dir_in_top, dir_out_top, self._top_out, top_out_inner,
                     anchor_out_inner]
-        # , self.anchor_out]
+        # , self._anchor_out]
         codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4,
                  Path.LINETO, Path.LINETO, Path.LINETO, Path.CURVE4,
                  Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO]

@@ -237,11 +237,14 @@ class _ArtistProxy:
     """
     _artistcls = Artist  # derived must overwrite
 
-    def __init__(self, label=None, **kwargs):
+    def __init__(self, label=None, tags=None, **kwargs):
         """TODO: write docstring."""
         # TODO: not sure if stale is needed for this
         self.stale = True   # This only tracks form/layout but no style changes
         self._tags = []     # list of tag identifiers (label of a tag)
+        if tags is not None:
+            for tag in tags:
+                self.add_tag(tag)
         self._tag_props = dict()  # stores properties from tags
         self._tag_props_nonappl = dict()  # stores properties from tags that
         self._artist = None
@@ -379,6 +382,7 @@ class _ArtistProxy:
         pc_props = dict(props)
         pc_props.update(nonappl_props)
         pc_props.update(self._tag_props_nonappl)
+        pc_props.update(self._kwargs)
         self._pre_creation(ax=ax, **pc_props)
         self._init_artist(ax)
         self._update_artist(**props)
@@ -414,7 +418,7 @@ class _Block(_ArtistProxy):
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
     def __init__(self, height, width=None, xa=None, ya=None, label=None,
-                 tag=None, horizontalalignment='left',
+                 tags=None, horizontalalignment='left',
                  verticalalignment='bottom', label_margin=(0, 0),
                  **kwargs):
         """
@@ -446,7 +450,7 @@ class _Block(_ArtistProxy):
           %(Patch_kwdoc)s
 
         """
-        super().__init__(label=label, **kwargs)
+        super().__init__(label=label, tags=tags, **kwargs)
 
         self._height = height
         self._width = width
@@ -832,7 +836,8 @@ class _Flow(_ArtistProxy):
     _artistcls = patches.PathPatch
     to_canonical = to_canonical(_artistcls)
 
-    def __init__(self, flow, source=None, target=None, label=None, **kwargs):
+    def __init__(self, flow, source=None, target=None, label=None, tags=None,
+                 **kwargs):
         """
 
         Parameters
@@ -857,7 +862,7 @@ class _Flow(_ArtistProxy):
         # self._interp_steps = kwargs.pop('interpolation_steps', 1)
         self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
 
-        super().__init__(label=label, **kwargs)
+        super().__init__(label=label, tags=tags, **kwargs)
 
         self.source = source
         self.target = target
@@ -987,19 +992,29 @@ class _Flow(_ArtistProxy):
         _kwargs = dict(kwargs)
         _kwargs.update(self._kwargs)
         # resolve properties that simply point to the source or target block
+        kwargs = dict()
         for prop, value in _kwargs.items():
+            # we use setters if value refers to blocks as this leads to an
+            # individual styling
             if value == 'source':
-                _kwargs[prop] = getattr(self.source, f"get_{prop}")()
+                getattr(self,
+                        f'set_{prop}')(getattr(self.source,
+                                               f"get_{prop}")())
             elif value == 'target':
-                _kwargs[prop] = getattr(self.target, f"get_{prop}")()
+                # _kwargs[prop] = getattr(self.target, f"get_{prop}")()
+                getattr(self,
+                        f'set_{prop}')(getattr(self.target,
+                                               f"get_{prop}")())
             elif value == 'interpolate':
                 # TODO:
                 raise NotImplementedError("The mode 'interpolate' for the"
                                           f" property '{prop}' of a _Flow is"
                                           "not yet implemented")
+            else:
+                kwargs[prop] = value
         # TODO: dont update the artist directly as this leads to discrepancy
         # between proxy and artist.
-        self._artist.update(_kwargs)
+        self._artist.update(kwargs)
 
 
 @_expose_artist_getters_and_setters
@@ -1012,7 +1027,7 @@ class _ProxyCollection(_ArtistProxy):
     _singular_props = ['zorder', 'hatch', 'pickradius', 'capstyle',
                        'joinstyle', 'cmap', 'norm']
 
-    def __init__(self, proxies, label=None, **kwargs):
+    def __init__(self, proxies, label=None, tags=None, **kwargs):
         """
         Parameters
         ----------
@@ -1028,7 +1043,7 @@ class _ProxyCollection(_ArtistProxy):
             # TODO: allow either a block property, x, or custom array
             self._cmap_data = 'x'
 
-        super().__init__(label=label, **kwargs)
+        super().__init__(label=label, tags=tags, **kwargs)
 
         # TODO: this can be more generally just a ArtistProxy
         self._proxies = proxies
@@ -1039,6 +1054,9 @@ class _ProxyCollection(_ArtistProxy):
 
     def __getitem__(self, key):
         return self._proxies[key]
+
+    def __bool__(self,):
+        return bool(self._proxies)
 
     def to_element_styling(self, styleprops: dict):
         """
@@ -1131,6 +1149,7 @@ class _Tag(cm.ScalarMappable):
         self._alpha = None
         self._mappable = None
         self._mappables = dict()
+        self._props = dict()
         # if kwargs:
         #     _kwargs = dict(kwargs)
         #     # self._label = _kwargs.pop('label', None)
@@ -1232,7 +1251,7 @@ class _Tag(cm.ScalarMappable):
         self._mappable = props.pop('mappable', None)
         if self._mappable is not None:
             self.stale = True
-        self._props = props
+        self._props.update(props)
 
     def get_props(self, obj_id):
         """Return the properties specific to an object_id."""
@@ -1250,7 +1269,7 @@ class SubDiagram:
     """
     def __init__(self, x, columns, flows, label=None, yoff=0, hspace=1,
                  hspace_combine='add', label_margin=(0, 0), layout='centered',
-                 blockprops=None, flowprops=None, **kwargs):
+                 blockprops=None, flowprops=None, tags=None, **kwargs):
         """
         Parameters
         ----------
@@ -1330,7 +1349,7 @@ class SubDiagram:
         _blocks = []
         self._columns = []
         if _provided_blocks:
-            for col in columns:
+            for c_i, col in enumerate(columns):
                 column = list(col)
                 _blocks.extend(column)
                 self._columns.append(column)
@@ -1341,9 +1360,18 @@ class SubDiagram:
                 self._columns.append(column)
                 _blocks.extend(column)
         self._nbr_columns = len(self._columns)
+        # Tagging blocks if tags are provided
+        if tags is not None:
+            for c_i, col in enumerate(self._columns):
+                column = list(col)
+                if tags is not None:
+                    col_tags = tags[c_i]
+                    for i, block in enumerate(column):
+                        block.add_tag(col_tags[i])
 
         # TODO: below attributes need to be handled
         self._redistribute_vertically = 4
+        self._xlim = None
         self._ylim = None
 
         self._blocks = _ProxyCollection(_blocks, label=label,
@@ -1755,20 +1783,26 @@ class SubDiagram:
                 other_kwargs[k] = v
         return sdkwargs, other_kwargs
 
-    def create_artists(self, ax, **kwargs):
-        """TODO: write docstring."""
-        if self.stale:
-            self.generate_layout()
-        _kwargs = dict(kwargs)
-        _kwargs.update(self._kwargs)
-        # first create the blocks
-        _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
-        self._blocks.create_artist(ax=ax, **_blockkws)
-        # then create the flows
-        _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
-        self._flows.create_artist(ax=ax, **_flowkws)
-        # at last make sure the datalimits are updated
-        self._update_datalim()
+    def create_block_artists(self, ax, **kwargs):
+        if self._blocks:
+            if self.stale:
+                self.generate_layout()
+            _kwargs = dict(kwargs)
+            _kwargs.update(self._kwargs)
+            _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
+            self._blocks.create_artist(ax=ax, **_blockkws)
+            # at last make sure the datalimits are updated
+            self._update_datalim()
+
+    def create_flow_artists(self, ax, **kwargs):
+        if self._flows:
+            _kwargs = dict(kwargs)
+            _kwargs.update(self._kwargs)
+            if self.stale:
+                self.generte_layout()
+                self.create_block_artists(self, ax=ax, **kwargs)
+            _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
+            self._flows.create_artist(ax=ax, **_flowkws)
 
 
 class Alluvial:
@@ -1883,6 +1917,7 @@ class Alluvial:
         self._original_blockprops = blockprops
         self._original_flowprops = flowprops
         self._diagrams = []
+        self._cross_flows = []
         self._tags = defaultdict(_Tag)
         self._extouts = []
         self._diagc = 0
@@ -1984,14 +2019,32 @@ class Alluvial:
 
     def add_memberships(self, memberships, absentval=None, x=None, label=None,
                         yoff=None, **kwargs):
-        """TODO: write docstring."""
-        return self._from_membership(memberships, absentval, x, label, yoff,
-                                     **kwargs)
+        """
+        Add an new subdiagram from a sequence of membership lists.
+
+        Parameters
+        ----------
+        memberships : sequence of array-like objects or dataframe
+            The length of the sequence determines the number of columns in the
+            diagram. Each element in the sequence must be an array-like object
+            representing a membership list. For further details see below.
+        absentval : int or np.nan (default=None)
+            Notes for which  this value is encountered in the membership lists
+            are considered to not be present.
+
+        Note that all elements in *memberships* must be membership lists of
+        identical length. Further the group identifiers present in a membership
+        list must be derived from an enumeration of the groups.
+
+        """
+        return self._from_membership(memberships=memberships,
+                                     absentval=absentval, x=x, label=label,
+                                     yoff=yoff, **kwargs)
 
     # TODO: rename this to the above
     # TODO: add support for changing axis=0/1 in case of pandas df
     def _from_membership(self, memberships, absentval=None, x=None, label=None,
-                         yoff=None, **kwargs):
+                         yoff=None, tags=None, **kwargs):
         memberships = _to_valid_arrays(memberships, 'memberships', np.int)
         for i, membership in enumerate(memberships):
             if np.unique(membership).size != np.max(membership) + 1:
@@ -2023,27 +2076,27 @@ class Alluvial:
             columns.append(col + ext)
             memship_last = memberships[i]
             nbr_blocks_last = nbr_blocks
-        if x is not None:
-            x = _to_valid_arrays(x, 'x')
-        elif self._x is not None:
-            x = self._x
-        else:
-            x, columns = index_of(columns)
         x, columns = self._determine_x(x, columns)
-        return self._add(columns, flows, x=x, label=label, yoff=yoff, **kwargs)
+        return self._add(columns, flows, x=x, label=label, yoff=yoff,
+                         tags=tags, **kwargs)
 
     @classmethod
-    def from_memberships(cls, memberships, absentval=None, x=None, label=None,
-                         yoff=0.0, **kwargs):
+    def from_memberships(cls, memberships, dcs=None, absentval=None, x=None,
+                         separate_dcs=False, label=None, yoff=0.0, **kwargs):
         """
         Add an new subdiagram from a sequence of membership lists.
 
         Parameters
         ----------
-        memberships : sequence of array-like objects or dataframe
+        memberships : sequence of array-like objects or dataframe.
             The length of the sequence determines the number of columns in the
             diagram. Each element in the sequence must be an array-like object
             representing a membership list. For further details see below.
+        dcs : sequence of array-like objects or dataframe (optional)
+            Sequence to further classify the classes used in the membership
+            lists. If provided *dcs* must be of the same length as
+            *memberships* and in each array of *memberships* the values
+            map to the index in the corresponding array of *dcs*.
         absentval : int or np.nan (default=None)
             Notes for which  this value is encountered in the membership lists
             are considered to not be present.
@@ -2054,8 +2107,31 @@ class Alluvial:
 
         """
         alluvial = Alluvial(x=x)
-        alluvial._from_membership(memberships, absentval, label=label,
-                                  yoff=yoff, **kwargs)
+        if dcs is not None:
+            dcs = _to_valid_arrays(dcs, 'dcs', np.int)
+            if separate_dcs:
+                # create individual sub-diagrams for each dc
+                raise NotImplementedError('Creating for each dcs a separate'
+                                          ' subdiagram is not yet implemented')
+            else:
+                # nbr_dcs = max(map(lambda x: x.max()))
+                nbr_dcs = int(max(np.amax(dc, initial=-1) for dc in dcs) + 1)
+                dc_tags = []
+                for i in range(nbr_dcs):
+                    _kwargs = dict(kwargs)
+                    _kwargs.update(alluvial.get_defaults())
+                    dc_tags.append(alluvial.register_tag(label=f'dc{i}',
+                                                         **_kwargs))
+                # create a sequence of tag arrays that will match with columns
+                tags = []
+                for col in dcs:
+                    tag_col = [dc_tags[i] for i in col]
+                    tags.append(tag_col)
+                alluvial._from_membership(memberships, absentval, label=label,
+                                          yoff=yoff, tags=tags, **kwargs)
+        else:
+            alluvial._from_membership(memberships, absentval, label=label,
+                                      yoff=yoff, **kwargs)
         return alluvial
 
     def _inject_default_blockprops(self,):
@@ -2065,6 +2141,9 @@ class Alluvial:
     def _inject_default_flowprops(self,):
         """Completing styling properties of flows with sensible defaults."""
         self._flowprops['alpha'] = self._flowprops.get('alpha', 0.7)
+        self._flowprops['facecolor'] = self._flowprops.get('facecolor',
+                                                           'source')
+        self._flowprops['linewidth'] = self._flowprops.get('linewidth', 0.0)
 
     def get_defaults(self,):
         """TODO: write docstring."""
@@ -2090,7 +2169,7 @@ class Alluvial:
         _flowprops = _kwargs.pop('flowprops', self._flowprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
-                             yoff=yoff, **_kwargs)
+                             yoff=yoff, tags=tags, **_kwargs)
         self._add_diagram(diagram)
         self._dlabels.append(label or f'diagram-{self._diagc}')
         self._diagc += 1
@@ -2285,18 +2364,28 @@ class Alluvial:
     def _create_collections(self):
         """TODO: write docstring."""
         combined_x = []
+        diag_zorder = 4
+        subd_defaults = []
         for diagram in self._diagrams:
+            # register the defaults to reuse them for the flows
+            subd_defaults.append(dict(self.get_defaults()))
             # TODO: Probably should not mess with the zorder, but at least
             # make it a property of Alluvial...
-            diag_zorder = 4
-            defaults = self.get_defaults()
-            diagram.create_artists(ax=self.ax, zorder=diag_zorder,
-                                   **defaults)
+            diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
+                                         **subd_defaults[-1])
             combined_x.extend(diagram.get_x().tolist())
             _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
             self._xlim = _update_limits(self._xlim, _xmin, _xmax)
             self._ylim = _update_limits(self._ylim, _ymin, _ymax)
-        # TODO: finally initiate all flows in _cross_flows
+        diag_zorder -= diag_zorder
+        # ###
+        # TODO: first draw the inter sub-diagram flows (corss-flows)
+        # ###
+
+        # now draw all other flows
+        for diagram, defaults in zip(self._diagrams, subd_defaults):
+            diagram.create_flow_artists(ax=self.ax, zorder=diag_zorder,
+                                        **defaults)
 
     def _collect_x_positions(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
@@ -2464,7 +2553,7 @@ class Alluvial:
         #         " register it first with *register_tag*."
         #     )
         #     return None
-        self._tags[label].style(props)
+        self._tags[label].set(**props)
 
 
 # TODO: legend handler for subdiagram and for alluvial diagram

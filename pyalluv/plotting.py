@@ -873,6 +873,7 @@ class _Flow(_ArtistProxy):
             self.source.add_outflow(self)
         if self.target is not None:
             self.target.add_inflow(self)
+        self._path = None
         self.stale = True
 
     def set_prefs(self, out_pref: int, in_pref: int):
@@ -884,6 +885,7 @@ class _Flow(_ArtistProxy):
         """
         self._out_pref = out_pref
         self._in_pref = in_pref
+        self.stale = True
 
     def get_prefs(self):
         """Get the preferred attach location on source and target block."""
@@ -895,23 +897,19 @@ class _Flow(_ArtistProxy):
 
     def set_locations(self, out: bool, bottom, top):
         """
-        Set the bottom and top location. Note that the bottom is the lower
-        corner while top is the upper corner. If *out* is set to `True` then
-        the provided *bottom* and *top* define the limits on the left side of
-        the flow and if *out* is `False` the right side.
+        Set the bottom and top location. Note that the segment from *bottom* to
+        *top* defines the area on a block where the flow exist perpendicular to
+        the block surface. If *out* is set to `True` then the provided *bottom*
+        and *top* define the area on the source block and if *out* is `False`
+        on the target block.
         """
         if out:
-            self._xy0_out = bottom
-            self._xy1_out = top
+            self._xy0_out = np.array(bottom)
+            self._xy1_out = np.array(top)
         else:
-            self._xy0_in = bottom
-            self._xy1_in = top
-
-    def _get_block_widths(self,):
-        """Return the dimensions (width and height) of the linked Proxies."""
-        _sx0, _sy0, swidth, _sheight = self.source.get_bbox().bounds
-        _tx0, _ty0, twidth, _theight = self.target.get_bbox().bounds
-        return swidth, twidth
+            self._xy0_in = np.array(bottom)
+            self._xy1_in = np.array(top)
+        self.stale = True
 
     def update_prefs(self,):
         """Determine the preferred anchor positions on source and target"""
@@ -934,73 +932,55 @@ class _Flow(_ArtistProxy):
 
     def _init_artist(self, ax):
         """TODO: write docstring."""
-        swidth, twidth = self._get_block_widths()
-        _dist = None
-        if self._out_pref:
-            if self._in_pref:
-                _dist = 2 / 3 * (self.target.get_corner(False, 1)[0] -
-                                 self.source.get_corner(True, -1)[0])
-            else:
-                _dist = 2 * swidth
-            if self._in_pref is not None:
-                pass
-            else:
-                raise Exception('flow with neither source nor target cluster')
+        # create the artist
+        if self.stale:
+            self.update_path()
+        self._artist = self._artistcls(self.get_path(), axes=ax)
 
-        # ###
-        # TODO: This can be shortened
-        # now complete the path points
-        print(self._xy0_out, self._xy0_in)
-        if self._xy0_out is not None:
-            xy0_out_inner = (self._xy0_out[0] - 0.5 * swidth, self._xy0_out[1])
-            dir_out_xy0 = (self._xy0_out[0] + _dist, self._xy0_out[1])
-        else:
-            # TODO set to form vanishing flow
-            # xy0_out = xy0_out_inner =
-            # dir_out_xy0 =
-            pass
-        if self._xy1_out is not None:
-            top_out_inner = (self._xy1_out[0] - 0.5 * swidth, self._xy1_out[1])
-            # 2nd point 2/3 of distance between clusters
-            dir_out_top = (self._xy1_out[0] + _dist, self._xy1_out[1])
-        else:
-            # TODO set to form vanishing flow
-            # top_out = top_out_inner =
-            # dir_out_top =
-            pass
-        if self._xy0_in is not None:
-            xy0_in_inner = (self._xy0_in[0] + 0.5 * twidth, self._xy0_in[1])
-            dir_in_xy0 = (self._xy0_in[0] - _dist, self._xy0_in[1])
-        else:
-            # TODO set to form new in flow
-            # xy0_in = xy0_in_inner =
-            # dir_in_xy0 =
-            pass
-        if self._xy1_in is not None:
-            top_in_inner = (self._xy1_in[0] + 0.5 * twidth, self._xy1_in[1])
-            dir_in_top = (self._xy1_in[0] - _dist, self._xy1_in[1])
-        else:
-            # TODO set to form new in flow
-            # top_in = top_in_inner =
-            # dir_in_top =
-            pass
-        # ###
+    def update_path(self):
+        """
+        Creates a path based on the current state of the flow and attaches the
+        path to the flow, un-staling the flow.
+        """
+        sx0, _, swidth, _ = self.source.get_bbox().bounds  # get the width in
+        tx0, _, twidth, _ = self.target.get_bbox().bounds  # converted units
+        out_hoff = np.array([0.5 * swidth, 0])  # horizontal offset on source
+        in_hoff = np.array([0.5 * twidth, 0])  # horizontal offset on target
+        gap_dist = tx0 - (sx0 + swidth)
+        # place the control points at the golden ratio in the gap distance
+        control_hoff = np.array([1 / 1.618 * gap_dist, 0])
+        # set the external corner points for the flow.
+        xy0_out_c = self._xy0_out - out_hoff
+        xy0_in_c = self._xy0_in + in_hoff
+        xy1_out_c = self._xy1_out - out_hoff
+        xy1_in_c = self._xy1_in + in_hoff
+        # set control points for the bezier curves
+        dir_out_xy0 = self._xy0_out + control_hoff
+        dir_out_xy1 = self._xy1_out + control_hoff
+        dir_in_xy0 = self._xy0_in - control_hoff
+        dir_in_xy1 = self._xy1_in - control_hoff
+        # define the vertices
+        vertices = [xy0_out_c, self._xy0_out, dir_out_xy0, dir_in_xy0,
+                    self._xy0_in, xy0_in_c, xy1_in_c, self._xy1_in,
+                    dir_in_xy1, dir_out_xy1, self._xy1_out, xy1_out_c]
+        # encode the drawing
+        codes = [Path.MOVETO, Path.LINETO, Path.CURVE4, Path.CURVE4,
+                 Path.CURVE4, Path.LINETO, Path.LINETO, Path.LINETO,
+                 Path.CURVE4, Path.CURVE4, Path.CURVE4, Path.LINETO]
+        self.set_path(Path(vertices, codes))
 
-        vertices = [self._xy0_out, dir_out_xy0, dir_in_xy0,
-                    self._xy0_in, xy0_in_inner, top_in_inner, self._xy1_in,
-                    dir_in_top, dir_out_top, self._xy1_out, top_out_inner,
-                    xy0_out_inner]
-        # , self._xy0_out]
-        codes = [Path.MOVETO, Path.CURVE4, Path.CURVE4, Path.CURVE4,
-                 Path.LINETO, Path.LINETO, Path.LINETO, Path.CURVE4,
-                 Path.CURVE4, Path.CURVE4, Path.LINETO, Path.LINETO]
-        # Path.CLOSEPOLY]
-        # TODO: not sure about these values
-        closed = True
-        readonly = True
-        interp_steps = 1
-        _path = Path(vertices, codes, interp_steps, closed, readonly)
-        self._artist = self._artistcls(_path, axes=ax)
+    def set_path(self, path):
+        self._path = path
+        if self._artist is not None:
+            self._artist.set_path(path)
+        self.stale = False
+
+    def get_path(self,):
+        """Return the :obj:`.path.Path` associated to this flow."""
+        if self._artist is not None:
+            return self._artist.get_path()
+        else:
+            return self._path
 
     def _update_artist(self, **kwargs):
         """Update the artist of a _Flow."""
@@ -1017,6 +997,8 @@ class _Flow(_ArtistProxy):
                 raise NotImplementedError("The mode 'interpolate' for the"
                                           f" property '{prop}' of a _Flow is"
                                           "not yet implemented")
+        # TODO: dont update the artist directly as this leads to discrepancy
+        # between proxy and artist.
         self._artist.update(_kwargs)
 
 

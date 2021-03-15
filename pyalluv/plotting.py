@@ -450,6 +450,7 @@ class _Block(_ArtistProxy):
           %(Patch_kwdoc)s
 
         """
+
         super().__init__(label=label, tags=tags, **kwargs)
 
         self._height = height

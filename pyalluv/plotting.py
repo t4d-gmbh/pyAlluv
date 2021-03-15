@@ -25,7 +25,6 @@ from matplotlib.dates import date2num, AutoDateLocator, AutoDateFormatter
 from datetime import datetime
 from bisect import bisect_left
 
-# TODO: unused so far
 _log = logging.getLogger(__name__)
 
 __author__ = 'Jonas I. Liechti'
@@ -1122,8 +1121,6 @@ class _Tag(cm.ScalarMappable):
         Parameters
         ----------
         """
-        # cm.ScalarMappable.__init__(self, norm, cmap)
-
         super().__init__()
         self._marked_obj = WeakValueDictionary()
         self._is_filled = True   # By default both facecolor and edgecolor will
@@ -1132,10 +1129,6 @@ class _Tag(cm.ScalarMappable):
         self._mappable = None
         self._mappables = dict()
         self._props = dict()
-        # if kwargs:
-        #     _kwargs = dict(kwargs)
-        #     # self._label = _kwargs.pop('label', None)
-        #     self.set(**_kwargs)
         self.stale = True
 
     # from collection
@@ -1190,7 +1183,8 @@ class _Tag(cm.ScalarMappable):
         # TODO: get the relevant value from the proxy
         # self._kwargs.update(kw)
         if self._mappable is not None:
-            self._mappables[proxy_id] = getattr(proxy, f'get_{self._mappable}')()
+            self._mappables[proxy_id] = getattr(proxy,
+                                                f'get_{self._mappable}')()
             self.stale = True
         # remember the proxy
         self._marked_obj[proxy_id] = proxy
@@ -1738,7 +1732,10 @@ class SubDiagram:
             return False
 
     def _distribute_kwargs(self, kwargs):
-        """Check for block/flow specific kwargs and move them to block-/flowprops"""
+        """
+        Check for block/flow specific kwargs and move them to
+        block-/flowprops
+        """
         _kwargs = cbook.normalize_kwargs(kwargs,
                                          _ProxyCollection._artistcls)
         cmap = _kwargs.pop('cmap', None)
@@ -1885,9 +1882,6 @@ class Alluvial:
         # nothing to set for blocks for now
         self._inject_default_blockprops()
         self._inject_default_flowprops()
-        # there is no imminent reason why to keep the original input, but...
-        self._original_blockprops = blockprops
-        self._original_flowprops = flowprops
         self._diagrams = []
         self._cross_flows = []
         self._tags = defaultdict(_Tag)
@@ -2125,9 +2119,6 @@ class Alluvial:
 
     def _add(self, columns, flows, x, label, yoff, tags=None, **kwargs):
         """TODO: write docstring."""
-        # TODO: handle tags: not actually tags, but str to define ensembles
-        # like 'columns', 'index', etc. might also get rid of this.
-
         # Note: here the defaults from alluvial are passed to the new
         # subdiagram (is relevant for those for the proxies, like layout)
         # defaults are actually passed once again when calling
@@ -2193,9 +2184,9 @@ class Alluvial:
         x : array-like, optional
             The x coordinates of the columns.
 
-            When provided, the added diagram ignores the x coordinates that might
-            have been provided on initiation of the `.Alluvial` instance or any
-            previous :meth:`.Alluvial.add` call.
+            When provided, the added diagram ignores the x coordinates that
+            might have been provided on initiation of the `.Alluvial` instance
+            or any previous :meth:`.Alluvial.add` call.
 
             If the `.Alluvial` instance had no values set for the x coordinates
             *x* will be set to the new default.
@@ -2518,7 +2509,7 @@ class Alluvial:
             block.add_tag(tag)
 
     def style_tag(self, label, **props):
-        """TODO: write docstring.
+        """
         Note that when attached to a block, the styling of a tag overwrites the
         styling defined in the sub-diagram the block belongs to. One exception
         is if the sub-diagram has a colormap defined. In this case the
@@ -2526,12 +2517,6 @@ class Alluvial:
         this sub-diagram. This is because a PatchCollection re-sets the
         facecolor at drawing time if a colormap is provided.
         """
-        # if label not in self._tags:
-        #     _log.warning(
-        #         f"The tag '{label}' is not registered. You must"
-        #         " register it first with *register_tag*."
-        #     )
-        #     return None
         self._tags[label].set(**props)
 
 

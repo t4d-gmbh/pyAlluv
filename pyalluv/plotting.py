@@ -278,9 +278,6 @@ class _ArtistProxy:
             self._tags.remove(tag)
             self._set_tag_props()
 
-    # TODO: not sure if needed
-    tags = property(get_tags, set_tags)
-
     @property
     def is_tagged(self):
         """Indicate whether a block belongs to a tag or not."""
@@ -655,18 +652,6 @@ class _Block(_ArtistProxy):
         """Return a list of incoming `._Flows`."""
         return self._inflows
 
-    # def set_outflows(self, outflows):
-    #     """TODO: write docstring."""
-    #     self._outflows = outflows
-
-    # def set_inflows(self, inflows):
-    #     """TODO: write docstring."""
-    #     self._inflows = inflows
-
-    # xa = property(get_xa, set_xa, doc="The block anchor's x coordinate")
-    # ya = property(get_ya, set_ya, doc="The block anchor's y coordinate")
-    # y = property(get_y, set_y, doc="The y coordinate of the block bottom")
-    # x = property(get_x, None, doc="The x coordinate of the block bottom")
     inflows = property(get_inflows, None,  # set_inflows,
                        doc="List of `._Flow` objects entering the block.")
     outflows = property(get_outflows, None,  # set_outflows,
@@ -712,7 +697,8 @@ class _Block(_ArtistProxy):
 
     def _post_creation(self, ax=None):
         # enforce setting the edgecolor to draw the border of the block.
-        if not hasattr(self, 'own_edgecolor') and self.get_edgecolor()[3] == 0.0:
+        if not hasattr(self, 'own_edgecolor') \
+                and self.get_edgecolor()[3] == 0.0:
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
 
@@ -844,15 +830,10 @@ class _Flow(_ArtistProxy):
 
         By default *edgecolor* and *facecolor* are set to `lightgray`.
         """
-        # self._interp_steps = kwargs.pop('interpolation_steps', 1)
-        self.out_flow_vanish = kwargs.pop('out_flow_vanish', 'top')
-
         super().__init__(label=label, tags=tags, **kwargs)
 
         self.source = source
         self.target = target
-        # TODO: Is this really needed?
-        self._original_flow = flow
         self.flow = flow
         self._out_pref = 0  # +/-: top/bottom,  2: high prio, 1: low prio
         self._in_pref = 0   # +/-: top/bottom,  2: high prio, 1: low prio
@@ -866,6 +847,27 @@ class _Flow(_ArtistProxy):
         self._path = None
         self.stale = True
 
+    def get_prefs(self):
+        """Get the preferred attach location on source and target block."""
+        return self._out_pref, self._in_pref
+
+    def get_pref(self, out: bool):
+        """Get the preferred attach location on source (if *out*) or target."""
+        return self._out_pref if out else self._in_pref
+
+    def get_path(self,):
+        """Return the :obj:`.path.Path` associated to this flow."""
+        if self._artist is not None:
+            return self._artist.get_path()
+        else:
+            return self._path
+
+    def set_path(self, path):
+        self._path = path
+        if self._artist is not None:
+            self._artist.set_path(path)
+        self.stale = False
+
     def set_prefs(self, out_pref: int, in_pref: int):
         """
         Set the preferred attach locations. Preferences are encoded as follows:
@@ -876,14 +878,6 @@ class _Flow(_ArtistProxy):
         self._out_pref = out_pref
         self._in_pref = in_pref
         self.stale = True
-
-    def get_prefs(self):
-        """Get the preferred attach location on source and target block."""
-        return self._out_pref, self._in_pref
-
-    def get_pref(self, out: bool):
-        """Get the preferred attach location on source (if *out*) or target."""
-        return self._out_pref if out else self._in_pref
 
     def set_locations(self, out: bool, bottom, top):
         """
@@ -920,13 +914,6 @@ class _Flow(_ArtistProxy):
                     out_pref, in_pref = -1, 1
         self.set_prefs(out_pref, in_pref)
 
-    def _init_artist(self, ax):
-        """TODO: write docstring."""
-        # create the artist
-        if self.stale:
-            self.update_path()
-        self._artist = self._artistcls(self.get_path(), axes=ax)
-
     def update_path(self):
         """
         Creates a path based on the current state of the flow and attaches the
@@ -959,18 +946,12 @@ class _Flow(_ArtistProxy):
                  Path.CURVE4, Path.CURVE4, Path.CURVE4, Path.LINETO]
         self.set_path(Path(vertices, codes))
 
-    def set_path(self, path):
-        self._path = path
-        if self._artist is not None:
-            self._artist.set_path(path)
-        self.stale = False
-
-    def get_path(self,):
-        """Return the :obj:`.path.Path` associated to this flow."""
-        if self._artist is not None:
-            return self._artist.get_path()
-        else:
-            return self._path
+    def _init_artist(self, ax):
+        """TODO: write docstring."""
+        # create the artist
+        if self.stale:
+            self.update_path()
+        self._artist = self._artistcls(self.get_path(), axes=ax)
 
     def _update_artist(self, **kwargs):
         """Update the artist of a _Flow."""
@@ -1016,21 +997,14 @@ class _ProxyCollection(_ArtistProxy):
         """
         Parameters
         ----------
-        blocks : sequence of :obj:`_Block`
-            The blocks in this collection.
+        proxies : sequence of :obj:`_ArtistProxy`
+            The proxies in this collection.
         label : str, optional
             Label of the collection.
         """
-        # TODO: cmap does not work with datetime as x axis yet...
-        # get cmap data:
-        self._cmap_data = kwargs.pop('mappable', None)
-        if self._cmap_data is not None:
-            # TODO: allow either a block property, x, or custom array
-            self._cmap_data = 'x'
-
         super().__init__(label=label, tags=tags, **kwargs)
 
-        # TODO: this can be more generally just a ArtistProxy
+        self._cmap_data = kwargs.pop('mappable', None)
         self._proxies = proxies
         self._match_original = None
 
@@ -1044,22 +1018,16 @@ class _ProxyCollection(_ArtistProxy):
         return bool(self._proxies)
 
     def to_element_styling(self, styleprops: dict):
-        """
-        Convert the styling properties to lists matching self._proxies.
-        """
-        # normalize
+        """Convert the styling properties to lists matching self._proxies."""
         _styprops = cbook.normalize_kwargs(styleprops, self._artistcls)
         indiv_props = {sp: _styprops.pop(sp)
                        for sp in self._singular_props if sp in _styprops}
         for prop, altval in _styprops.items():
-            # indiv_props[prop] = [getattr(p, f"get_{prop}", lambda: altval)()
-            #                      for p in self._proxies]
-            indiv_props[prop] = [p.get(prop, altval)
-                                 for p in self._proxies]
+            indiv_props[prop] = [p.get(prop, altval) for p in self._proxies]
         return indiv_props
 
     def _pre_creation(self, ax=None, **kwargs):
-        """Ensure all proxies create their own artists"""
+        """Ensure all proxies create their own artists."""
         self._match_original = False
         for proxy in self._proxies:
             proxy.create_artist(ax=ax, **kwargs)
@@ -1073,12 +1041,9 @@ class _ProxyCollection(_ArtistProxy):
     def _init_artist(self, ax):
         """
         Creates `.PatchCollections`s for the blocks in this collection.
-
-        Parameters
-        ----------
-
+        Note that *ax* is unused for a ProxyCollection as the collection is
+        attached to an axes in :meth:`._post_creation'
         """
-        # TODO: does this work with 'interpolate'?
         self._artist = self._artistcls(
             [proxy.get_artist() for proxy in self._proxies],
             match_original=self._match_original,
@@ -1087,8 +1052,7 @@ class _ProxyCollection(_ArtistProxy):
             _mappable_array = np.asarray([getattr(proxy,
                                                   f'get_{self._cmap_data}')()
                                           for proxy in self._proxies])
-            # Note: cmap does not (jet) work with datetime objects, so we
-            # convert them here
+            # Note: cmap doesn't work with datetime objects, so we convert them
             _first_mappable = cbook.safe_first_element(_mappable_array)
             if isinstance(_first_mappable, datetime):
                 _mappable_array = date2num(_mappable_array)
@@ -1099,20 +1063,21 @@ class _ProxyCollection(_ArtistProxy):
         _kwargs.update(self._kwargs)
         if self._match_original:
             # make sure to not overwrite individual properties
-            for props in ('facecolor', 'edgecolor', 'linewidth',
-                          'linestyle', 'antialiased'):
+            for props in ('facecolor', 'edgecolor', 'linewidth', 'linestyle',
+                          'antialiased'):
                 _kwargs.pop(props, None)
         self._artist.update(_kwargs)
 
     def _post_creation(self, ax=None):
         # ###
         # TODO: broadcast styling to proxies
+        # NOT SURE WHY THIS WAS NEEDED
         # ###
         self._artist = ax.add_collection(self._artist)
 
-    def add_proxy(self, proxy):
-        """Add a Proxy."""
-        self._proxies.append(proxy)
+    # def add_proxy(self, proxy):
+    #     """Add a Proxy."""
+    #     self._proxies.append(proxy)
 
 
 class _Tag(cm.ScalarMappable):
@@ -1135,7 +1100,6 @@ class _Tag(cm.ScalarMappable):
         self._props = dict()
         self.stale = True
 
-    # from collection
     def _update_scalarmappable(self):
         """Update colors from the scalar mappable array, if it is not None."""
         marked_obj_ids = list(self._marked_obj.keys())
@@ -1143,8 +1107,7 @@ class _Tag(cm.ScalarMappable):
         _mappable_array = np.asarray([getattr(self._marked_obj[oid],
                                               f'get_{self._mappable}')()
                                       for oid in marked_obj_ids])
-        # Note: cmap does not (jet) work with datetime objects, so we convert
-        # them here
+        # Note: cmap doesn't work with datetime objects, so we convert the data
         _first_mappable = cbook.safe_first_element(_mappable_array)
         if isinstance(_first_mappable, datetime):
             _mappable_array = date2num(_mappable_array)
@@ -1170,11 +1133,9 @@ class _Tag(cm.ScalarMappable):
 
         _colors = self.to_rgba(self._A, self._alpha)
         if self._is_filled:
-            # self._facecolors = self.to_rgba(self._A, self._alpha)
             for i, oid in enumerate(marked_obj_ids):
                 self._proxy_props[oid]['facecolor'] = _colors[i]
         elif self._is_stroked:
-            # self._edgecolors = self.to_rgba(self._A, self._alpha)
             for i, oid in enumerate(marked_obj_ids):
                 self._proxy_props[oid]['edgecolor'] = _colors[i]
 
@@ -1182,16 +1143,11 @@ class _Tag(cm.ScalarMappable):
         """TODO: write docstring."""
         proxy_id = id(proxy)
         if proxy_id in self._marked_obj:
-            # if the proxy was already registered, ignore it
-            return
-        # TODO: get the relevant value from the proxy
-        # self._kwargs.update(kw)
+            return  # if the proxy was already registered, ignore it
         if self._mappable is not None:
-            self._mappables[proxy_id] = getattr(proxy,
-                                                f'get_{self._mappable}')()
+            self._mappables[proxy_id] = getattr(proxy, f'get_{self._mappable}')()
             self.stale = True
-        # remember the proxy
-        self._marked_obj[proxy_id] = proxy
+        self._marked_obj[proxy_id] = proxy  # remember the proxy
 
     def deregister_proxy(self, proxy):
         proxy_id = id(proxy)
@@ -1227,7 +1183,6 @@ class _Tag(cm.ScalarMappable):
         props = dict(props)
         self.set_cmap(props.pop('cmap', None))
         self.set_norm(props.pop('norm', None))
-        # TODO: set a global default for the mappable
         self._mappable = props.pop('mappable', None)
         if self._mappable is not None:
             self.stale = True
@@ -1371,12 +1326,11 @@ class SubDiagram:
                     if flow:
                         _flows.append(_Flow(flow=flow, source=s_col[j],
                                             target=t_col[i]))
-        # TODO: update flowprops with kwargs and label
         self._flows = _ProxyCollection(_flows, label=label, **self._flowprops)
         self._hspace = hspace
-        # TODO: create set_... and process like set_hspace
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
+        # TODO: setting label position is not implemented yet
         self._label_margin = label_margin
         self.generate_layout()
 
@@ -1496,18 +1450,18 @@ class SubDiagram:
         # TODO: move columns vert. to minimize vertical comp. flows attached
         self.stale = False
 
-    def add_block(self, column: int, block):
-        """Add a Block to a column."""
-        self._blocks.add_proxy(block)
-        self._columns[column].append(block)
-        self.stale = True
+    # def add_block(self, column: int, block):
+    #     """Add a Block to a column."""
+    #     self._blocks.add_proxy(block)
+    #     self._columns[column].append(block)
+    #     self.stale = True
 
-    def add_flow(self, column, flow):
-        """TODO: write docstring."""
-        # TODO: _columns can only contain indices for blocks
-        # self._columns[column].append(flow)
-        self.stale = True
-        pass
+    # def add_flow(self, column, flow):
+    #     """TODO: write docstring."""
+    #     # TODO: _columns can only contain indices for blocks
+    #     # self._columns[column].append(flow)
+    #     self.stale = True
+    #     pass
 
     def get_column_hspace(self, col_id):
         """TODO: write docstring."""

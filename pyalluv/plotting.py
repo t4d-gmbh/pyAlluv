@@ -312,6 +312,118 @@ class _ArtistProxy:
         or to one of its Tags.
         If the property was not explicitly set, *altval* is returned.
 
+
+        Parameters
+        ----------
+        prop : str
+            The normalized name of the property to fetch.
+        altval : Any (default: None)
+            The value to return in case *prop* is not set.
+
+        Note that aliases are not allowed for *prop*. This is because tags are
+        included when trying to get the styling property and a single tag might
+        be associated to proxies of various artist subclasses that might not
+        all have the same set aliases.
+        """
+        if getattr(self, f"own_{prop}", False):
+            return getattr(self, f"get_{prop}")()
+        else:
+            if self.is_tagged:
+                if not self._tag_props:
+                    self._set_tag_props()
+                return self._tag_props.get(prop, altval)
+        return altval
+
+    @property
+    def is_styled(self,):
+        """Indicate if this element has custom styling."""
+        # NOTE: self.is_tagged might be too general as tags might not affect
+        # fc, ec, lw, lw and aa
+        return (self.is_tagged or self._is_styled)
+
+    def _pre_creation(self, ax, **kwargs):
+        """Method handling properties foreign to the attached artist class."""
+        pass
+
+    def _init_artist(self, ax):
+        """Initiate the artist."""
+        raise NotImplementedError('Derived must override')
+
+    def _update_artist(self, **kwargs):
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        self._artist.update(_kwargs)
+
+
+    def _post_creation(self, ax=None):
+        """Callback after the creation and init of artist."""
+        pass
+
+    def _applicable(self, props):
+        """
+        Separate *props* into applicable and non-applicable properties.
+        Applicable are properties for which the proxy has a 'set_' method.
+        """
+        applicable = dict()
+        nonapp = dict()
+        for prop, v in props.items():
+            if hasattr(self._artistcls, f"set_{prop}"):
+                applicable[prop] = v
+            else:
+                nonapp[prop] = v
+        return applicable, nonapp
+
+    def create_artist(self, ax, **props):
+        """Create the artist of this proxy."""
+        props = cbook.normalize_kwargs(props, self._artistcls)
+        props, nonappl_props = self._applicable(props)
+        # make sure to have the properties from all tags
+        self._set_tag_props()
+        props.update(self._tag_props)
+        # collect all properties to pass to pre_creation
+        pc_props = dict(props)
+        pc_props.update(nonappl_props)
+        pc_props.update(self._tag_props_nonappl)
+        pc_props.update(self._kwargs)
+        self._pre_creation(ax=ax, **pc_props)
+        self._init_artist(ax)
+        self._update_artist(**props)
+        self._post_creation(ax=ax)
+
+    # def add_artist(self, ax):
+    #     """Adding the artist to an axes."""
+    #     raise NotImplementedError('Derived must override')
+
+    def get_artist(self,):
+        """TODO: write docstring."""
+        if self._artist is None:
+            raise ValueError("The artist has not been created.")
+        return self._artist
+
+
+@_expose_artist_getters_and_setters
+@cbook._define_aliases({"verticalalignment": ["va"],
+                        "horizontalalignment": ["ha"], "width": ["w"],
+                        "height": ["h"]})
+class _Block(_ArtistProxy):
+    """
+    A Block in an Alluvial diagram.
+
+        Blocks in an Alluvial diagram get their vertical position assigned by a
+        layout algorithm and thus after creation. This is the rational to why
+        *_Block* inherits directly from `matplotlib.patches.Patch`, rather than
+        `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
+    """
+    _artistcls = Rectangle
+    to_canonical = to_canonical(_artistcls)
+
+    # TODO uncomment once in mpl
+    # @docstring.dedent_interpd
+    def __init__(self, height, width=None, xa=None, ya=None, label=None,
+                 tags=None, horizontalalignment='left',
+                 verticalalignment='bottom', label_margin=(0, 0),
+                 **kwargs):
+        """
         Parameters
         ----------
         prop : str
@@ -699,6 +811,7 @@ class _Block(_ArtistProxy):
         # enforce setting the edgecolor to draw the border of the block.
         if not hasattr(self, 'own_edgecolor') \
                 and self.get_edgecolor()[3] == 0.0:
+
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
 
@@ -878,7 +991,7 @@ class _Flow(_ArtistProxy):
         self._out_pref = out_pref
         self._in_pref = in_pref
         self.stale = True
-
+        
     def set_locations(self, out: bool, bottom, top):
         """
         Set the bottom and top location. Note that the segment from *bottom* to
@@ -1067,6 +1180,7 @@ class _ProxyCollection(_ArtistProxy):
                           'antialiased'):
                 _kwargs.pop(props, None)
         self._artist.update(_kwargs)
+
 
     def _post_creation(self, ax=None):
         # ###
@@ -1491,6 +1605,7 @@ class SubDiagram:
 
         Parameters
         -----------
+
         col_id: int
             The index of the column to recompute the distribution of blocks.
 

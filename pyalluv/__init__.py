@@ -1,6 +1,6 @@
-from .plotting import AlluvialPlot
-from .clusters import Cluster
-from .fluxes import Flux
+from .plotting import Alluvial
+from .plotting import _Block as Cluster
+from .plotting import _Flow as Flux
 
 # backwards compatibility for obsolete version
-SankeyPlot = AlluvialPlot
+SankeyPlot = Alluvial

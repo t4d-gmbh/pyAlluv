@@ -618,29 +618,6 @@ class _Block(_ArtistProxy):
         """Set the vertical alignment of the anchor point and the block."""
         self._set_verticalalignment(align)
 
-    # def get_anchor(self,):
-    #     """Return the anchor point of the block."""
-    #     return self._anchor
-
-    # def get_center(self,):
-    #     """Return the center point of the block."""
-    #     return (self.get_xc(),
-    #             self.get_yc())
-
-    # def set_xa(self, xa):
-    #     """Set the x coordinate of the anchor point."""
-    #     self._xa = xa
-    #     self.stale = True
-
-    # def set_ya(self, ya):
-    #     """Set the y coordinate of the anchor point."""
-    #     self._ya = ya
-    #     self.stale = True
-
-    # def set_xc(self, xc):
-    #     # TODO: however, not sure if this is really needed.
-    #     raise NotImplementedError('TODO')
-
     def set_yc(self, yc):
         """
         Set the y coordinate of the block center.
@@ -731,6 +708,11 @@ class _Block(_ArtistProxy):
                                        height=self._height, axes=ax)
 
     def _post_creation(self, ax=None):
+        # enforce setting the edgecolor to draw the border of the block.
+        if not hasattr(self, 'own_edgecolor') and self.get_edgecolor()[3] == 0.0:
+            fc = self.get_facecolor()
+            self._artist.set_edgecolor(fc)
+
         self.handle_flows()
     # ###
 
@@ -1878,16 +1860,6 @@ class Alluvial:
                 set `edgecolor` to the color of the source block if source and
                 target block are of different colors.
 
-            TODO: check the args below, remove or add to init
-            fill_figure: bool
-              indicating whether or not set the
-              axis dimension to fill up the entire figure
-            invisible_x/invisible_y: bool
-              whether or not to draw these axis.
-            redistribute_vertically: int (default=4)
-              how often the vertical pairwise swapping of blocks at a given
-              time point should be performed.
-
           Note that *blockprops* and *flowprops* set the properties of all
           sub-diagrams, unless specific properties are provided when a
           sub-diagram is added (see :meth:`add` for details), or
@@ -1911,7 +1883,7 @@ class Alluvial:
         self._flowprops = cbook.normalize_kwargs(flowprops,
                                                  _ProxyCollection._artistcls)
         # nothing to set for blocks for now
-        # self._inject_default_blockprops()
+        self._inject_default_blockprops()
         self._inject_default_flowprops()
         # there is no imminent reason why to keep the original input, but...
         self._original_blockprops = blockprops
@@ -1928,6 +1900,7 @@ class Alluvial:
         # how many x ticks are maximally shown
         self.max_nbr_xticks = 10
         self._defaults = dict()
+
         _kwargs = cbook.normalize_kwargs(kwargs,
                                          _ProxyCollection._artistcls)
         fc = _kwargs.get('facecolor', None)
@@ -2136,7 +2109,7 @@ class Alluvial:
 
     def _inject_default_blockprops(self,):
         """Completing styling properties of blocks with sensible defaults."""
-        pass
+        self._blockprops['linewidth'] = self._blockprops.get('linewidth', 2.0)
 
     def _inject_default_flowprops(self,):
         """Completing styling properties of flows with sensible defaults."""
@@ -2165,8 +2138,10 @@ class Alluvial:
         _kwargs = dict(self._defaults)
         _kwargs.update(cbook.normalize_kwargs(kwargs,
                                               _ProxyCollection._artistcls))
-        _blockprops = _kwargs.pop('blockprops', self._blockprops)
-        _flowprops = _kwargs.pop('flowprops', self._flowprops)
+        _blockprops = dict(self._blockprops)
+        _blockprops.update(_kwargs.pop('blockprops', {}))
+        _flowprops = dict(self._flowprops)
+        _flowprops.update(_kwargs.pop('flowprops', {}))
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
                              yoff=yoff, tags=tags, **_kwargs)
@@ -2368,11 +2343,13 @@ class Alluvial:
         subd_defaults = []
         for diagram in self._diagrams:
             # register the defaults to reuse them for the flows
-            subd_defaults.append(dict(self.get_defaults()))
+            subd_defaults.append(dict(self.get_defaults()))  # keep for flows
+            defaults = dict(subd_defaults[-1])
+            defaults.update(self._blockprops)
             # TODO: Probably should not mess with the zorder, but at least
             # make it a property of Alluvial...
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
-                                         **subd_defaults[-1])
+                                         **defaults)
             combined_x.extend(diagram.get_x().tolist())
             _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
             self._xlim = _update_limits(self._xlim, _xmin, _xmax)
@@ -2383,7 +2360,9 @@ class Alluvial:
         # ###
 
         # now draw all other flows
-        for diagram, defaults in zip(self._diagrams, subd_defaults):
+        for diagram, _defaults in zip(self._diagrams, subd_defaults):
+            defaults = dict(_defaults)
+            defaults.update(self._flowprops)
             diagram.create_flow_artists(ax=self.ax, zorder=diag_zorder,
                                         **defaults)
 

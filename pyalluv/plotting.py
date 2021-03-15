@@ -137,7 +137,10 @@ def _separate_selector(selector):
 
 
 def to_canonical(alias_mapping=None):
-    """Returns the canonical name of *name* based on *alias_mapping*"""
+    """
+    Provides a function that converts property names to their canonical name
+    based on *alias_mapping*
+    """
     # NOTE: this is simply a part of cbook.normalize_kwargs and could be
     # moved and used in cbook directly
     if alias_mapping is None:
@@ -152,6 +155,7 @@ def to_canonical(alias_mapping=None):
                      for alias in alias_list}
 
     def _get(name):
+        """Returns the canonical name of *name*"""
         return _to_canonical.get(name, name)
     return _get
 

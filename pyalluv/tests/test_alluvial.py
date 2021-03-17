@@ -273,9 +273,10 @@ class TestAlluvialStyling:
         # texax
         tesax = fig_test.subplots()
         style['ha'] = 'left'
-        alluv = Alluvial(x=x, ax=tesax, layout='bottom', blockprops=style)
+        style['va'] = 'bottom'
+        alluv = Alluvial(x=x, ax=tesax, blockprops=style, layout='bottom')
         alluv.add(flows=None, ext=[*zip(heights[:3], heights[3:6])],
-                  fc=single_c)
+                  fc=single_c, hspace_combine='add')
         # create a tag for the reds
         alluv.register_tag('tag0', cmap=blues, mappable='x')
         # alluv.register_tag('tag0')

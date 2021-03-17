@@ -2,6 +2,7 @@ import functools
 import inspect
 import logging
 import itertools
+from copy import copy
 from collections import defaultdict
 from weakref import WeakValueDictionary
 import numpy as np
@@ -160,6 +161,113 @@ def to_canonical(alias_mapping=None):
     return _get
 
 
+# NOTE: this is copy/paste form cbook with 1 exception: (line with _artistcls)
+def normalize_kwargs(kw, alias_mapping=None, required=(), forbidden=(),
+                     allowed=None):
+    """
+    Helper function to normalize kwarg inputs.
+
+    The order they are resolved are:
+
+    1. aliasing
+    2. required
+    3. forbidden
+    4. allowed
+
+    This order means that only the canonical names need appear in
+    *allowed*, *forbidden*, *required*.
+
+    Parameters
+    ----------
+    kw : dict or None
+        A dict of keyword arguments.  None is explicitly supported and treated
+        as an empty dict, to support functions with an optional parameter of
+        the form ``props=None``.
+
+    alias_mapping : dict or Artist subclass or Artist instance, optional
+        A mapping between a canonical name to a list of
+        aliases, in order of precedence from lowest to highest.
+
+        If the canonical value is not in the list it is assumed to have
+        the highest priority.
+
+        If an Artist subclass or instance is passed, use its properties alias
+        mapping.
+
+    required : list of str, optional
+        A list of keys that must be in *kws*.  This parameter is deprecated.
+
+    forbidden : list of str, optional
+        A list of keys which may not be in *kw*.  This parameter is deprecated.
+
+    allowed : list of str, optional
+        A list of allowed fields.  If this not None, then raise if
+        *kw* contains any keys not in the union of *required*
+        and *allowed*.  To allow only the required fields pass in
+        an empty tuple ``allowed=()``.  This parameter is deprecated.
+
+    Raises
+    ------
+    TypeError
+        To match what python raises if invalid args/kwargs are passed to
+        a callable.
+    """
+    from matplotlib.artist import Artist
+
+    if kw is None:
+        return {}
+
+    # deal with default value of alias_mapping
+    if alias_mapping is None:
+        alias_mapping = dict()
+    elif (isinstance(alias_mapping, type) and issubclass(alias_mapping, Artist)
+          or isinstance(alias_mapping, Artist)
+          or issubclass(getattr(alias_mapping, '_artistcls', None), Artist)):  # only modif is this line
+        alias_mapping = getattr(alias_mapping, "_alias_map", {})
+
+    to_canonical = {alias: canonical
+                    for canonical, alias_list in alias_mapping.items()
+                    for alias in alias_list}
+    canonical_to_seen = {}
+    ret = {}  # output dictionary
+
+    for k, v in kw.items():
+        canonical = to_canonical.get(k, k)
+        if canonical in canonical_to_seen:
+            raise TypeError(f"Got both {canonical_to_seen[canonical]!r} and "
+                            f"{k!r}, which are aliases of one another")
+        canonical_to_seen[canonical] = k
+        ret[canonical] = v
+
+    fail_keys = [k for k in required if k not in ret]
+    if fail_keys:
+        raise TypeError("The required keys {keys!r} "
+                        "are not in kwargs".format(keys=fail_keys))
+
+    fail_keys = [k for k in forbidden if k in ret]
+    if fail_keys:
+        raise TypeError("The forbidden keys {keys!r} "
+                        "are in kwargs".format(keys=fail_keys))
+
+    if allowed is not None:
+        allowed_set = {*required, *allowed}
+        fail_keys = [k for k in ret if k not in allowed_set]
+        if fail_keys:
+            raise TypeError(
+                "kwargs contains {keys!r} which are not in the required "
+                "{req!r} or allowed {allow!r} keys".format(
+                    keys=fail_keys, req=required, allow=allowed))
+
+    return ret
+
+
+def _include_artist_alias_map(cls):
+    artistcls_aliases = dict(getattr(cls._artistcls, "_alias_map", {}))
+    artistcls_aliases.update(getattr(cls, '_alias_map', {}))
+    cls._alias_map = artistcls_aliases
+    return cls
+
+
 def _expose_artist_getters_and_setters(cls):
     """
     Wrapper that exposes all setters and getters from a subclass of Artist in
@@ -249,7 +357,6 @@ class _ArtistProxy:
             for tag in tags:
                 self.add_tag(tag)
         self._tag_props = dict()  # stores properties from tags
-        self._tag_props_nonappl = dict()  # stores properties from tags that
         self._artist = None
         self._is_styled = False  # Indicates if styling properties were set
         self._kwargs = {}
@@ -289,12 +396,10 @@ class _ArtistProxy:
         if a tag is staled.
         """
         self._tag_props = dict()
-        self._tag_props_nonappl = dict()
         for tag in self._tags:
-            _tag_props, _nonappl = self._applicable(tag.get_props(id(self)))
-            _tag_props = cbook.normalize_kwargs(_tag_props, self._artistcls)
+            _tag_props = cbook.normalize_kwargs(tag.get_props(id(self)),
+                                                self._artistcls)
             self._tag_props.update(_tag_props)
-            self._tag_props_nonappl.update(_nonappl)
 
     def update(self, **props):
         # props = cbook.normalize_kwargs(props, self._artistcls)
@@ -340,9 +445,12 @@ class _ArtistProxy:
         # fc, ec, lw, lw and aa
         return (self.is_tagged or self._is_styled)
 
-    def _pre_creation(self, ax, **kwargs):
+    def _pre_creation(self, ax, **props):
         """Method handling properties foreign to the attached artist class."""
-        pass
+        self._set_tag_props()  # make sure to have the properties from all tags
+        props.update(self._tag_props)  # complete/overwrite with tag porperties
+        props.update(self._kwargs)  # complete/overwrite with onw properties
+        return props
 
     def _init_artist(self, ax):
         """Initiate the artist."""
@@ -371,22 +479,14 @@ class _ArtistProxy:
                 nonapp[prop] = v
         return applicable, nonapp
 
-    def create_artist(self, ax, **props):
+    def create_artist(self, ax, **kwargs):
         """Create the artist of this proxy."""
-        props = cbook.normalize_kwargs(props, self._artistcls)
-        props, nonappl_props = self._applicable(props)
-        # make sure to have the properties from all tags
-        self._set_tag_props()
-        props.update(self._tag_props)
-        # collect all properties to pass to pre_creation
-        pc_props = dict(props)
-        pc_props.update(nonappl_props)
-        pc_props.update(self._tag_props_nonappl)
-        pc_props.update(self._kwargs)
-        self._pre_creation(ax=ax, **pc_props)
-        self._init_artist(ax)
-        self._update_artist(**props)
-        self._post_creation(ax=ax)
+        props = cbook.normalize_kwargs(kwargs, self._artistcls)
+        props = self._pre_creation(ax=ax, **props)  # run prepare callback
+        props, _nonappl_props = self._applicable(props)
+        self._init_artist(ax)                  # initiate artist with defaults
+        self._update_artist(**props)           # apply collected properties
+        self._post_creation(ax=ax)             # wrap-up callback
 
     # def add_artist(self, ax):
     #     """Adding the artist to an axes."""
@@ -399,6 +499,7 @@ class _ArtistProxy:
         return self._artist
 
 
+@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 @cbook._define_aliases({"verticalalignment": ["va"],
                         "horizontalalignment": ["ha"], "width": ["w"],
@@ -418,8 +519,7 @@ class _Block(_ArtistProxy):
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
     def __init__(self, height, width=None, xa=None, ya=None, label=None,
-                 tags=None, horizontalalignment='left',
-                 verticalalignment='bottom', label_margin=(0, 0),
+                 tags=None, ha='center', va='bottom', label_margin=(0, 0),
                  **kwargs):
         """
         Parameters
@@ -434,9 +534,9 @@ class _Block(_ArtistProxy):
           Block width.
         label : str, optional
           Block label that can be displayed in the diagram.
-        horizontalalignment : {'center', 'left', 'right'}, default: 'center'
+        ha : {'center', 'left', 'right'}, default: 'center'
           The horizontal location of the anchor point of the block.
-        verticalalignment: {'center', 'top', 'bottom'}, default: 'center'
+        va: {'center', 'top', 'bottom'}, default: 'center'
           The vertical location of the anchor point of the block.
         label_margin: (float, float), default: (0., 0.)
             x and y margin in target coordinates of ``self.get_transform()``
@@ -457,8 +557,8 @@ class _Block(_ArtistProxy):
         self._width = width
         self._xa = xa
         self._ya = ya
-        self._set_horizontalalignment(horizontalalignment)
-        self._set_verticalalignment(verticalalignment)
+        self._set_horizontalalignment(ha)
+        self._set_verticalalignment(va)
         # init the in and out flows:
         self._outflows = []
         self._inflows = []
@@ -471,21 +571,21 @@ class _Block(_ArtistProxy):
     # getters and setters from attached artist
     def get_x(self):
         """Return the left coordinate of the block."""
-        x0 = self._xa
+        x = self._xa
         if self._horizontalalignment == 'center':
-            x0 -= 0.5 * self.get_width()
+            x -= 0.5 * self.get_width()
         elif self._horizontalalignment == 'right':
-            x0 -= self.get_width()
-        return x0
+            x -= self.get_width()
+        return x
 
     def get_y(self):
         """Return the bottom coordinate of the block."""
-        y0 = self._ya
+        y = self._ya
         if self._verticalalignment == 'center':
-            y0 -= 0.5 * self._height
+            y -= 0.5 * self._height
         elif self._verticalalignment == 'top':
-            y0 -= self._height
-        return y0
+            y -= self._height
+        return y
 
     def get_xy(self):
         """Return the left and bottom coords of the block as a tuple."""
@@ -494,9 +594,9 @@ class _Block(_ArtistProxy):
     def get_width(self):
         """Return the width of the block."""
         # TODO: this should be functionalized for other attributes
-        try:
+        if self._artist is not None:
             return self._artist.get_width()
-        except AttributeError:
+        else:
             return self._width
 
     def get_height(self):
@@ -597,6 +697,10 @@ class _Block(_ArtistProxy):
         """Return the y coordinate of the block's center."""
         return self.get_y() + 0.5 * self._height
 
+    def set_xa(self, x):
+        """Set the x coordinate of the anchor point."""
+        self._xa = x
+
     def _set_horizontalalignment(self, align):
         """TODO: write docstring."""
         # TODO: uncomment once in mpl
@@ -613,7 +717,7 @@ class _Block(_ArtistProxy):
 
     def set_horizontalalignment(self, align):
         """Set the horizontal alignment of the anchor point and the block."""
-        self._set_horizontalalignment(self, align)
+        self._set_horizontalalignment(align)
 
     def set_verticalalignment(self, align):
         """Set the vertical alignment of the anchor point and the block."""
@@ -682,27 +786,26 @@ class _Block(_ArtistProxy):
 
     # ###
     # class specific methods for create_artist:
-    def _pre_creation(self, ax=None, **kwargs):
-        if self._width is None:
-            try:
-                self.set_width(kwargs['width'])
-            except KeyError:
-                raise AttributeError("Block is missing the required argument"
-                                     " 'width'.")
+    def _pre_creation(self, ax=None, **props):
+        props = super()._pre_creation(ax=ax, **props)
+
+        # if facecolor was provided in a tag, complement the edgecolor
+        if 'facecolor' in props:
+            props['edgecolor'] = props.get('edgecolor', props['facecolor'])
+        return props
 
     def _init_artist(self, ax):
         """Blocks use :class:`patches.Rectangle` as their patch."""
-        # TODO: get width from kwargs and use 'set_width'
         self._artist = self._artistcls(self.get_xy(), width=self._width,
                                        height=self._height, axes=ax)
 
     def _post_creation(self, ax=None):
         # enforce setting the edgecolor to draw the border of the block.
-        if not hasattr(self, 'own_edgecolor') \
-                and self.get_edgecolor()[3] == 0.0:
+        if (hasattr(self, 'own_facecolor') and not
+                hasattr(self, 'own_edgecolor') and
+                self.get_edgecolor()[3] == 0.0):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
-
         self.handle_flows()
     # ###
 
@@ -800,6 +903,7 @@ class _Block(_ArtistProxy):
             self._set_flow_locations(out)
 
 
+@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 class _Flow(_ArtistProxy):
     """
@@ -984,6 +1088,7 @@ class _Flow(_ArtistProxy):
         self._artist.update(kwargs)
 
 
+@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 class _ProxyCollection(_ArtistProxy):
     """
@@ -1003,9 +1108,10 @@ class _ProxyCollection(_ArtistProxy):
         label : str, optional
             Label of the collection.
         """
+        self._cmap_data = kwargs.pop('mappable', None)
+
         super().__init__(label=label, tags=tags, **kwargs)
 
-        self._cmap_data = kwargs.pop('mappable', None)
         self._proxies = proxies
         self._match_original = None
 
@@ -1027,17 +1133,19 @@ class _ProxyCollection(_ArtistProxy):
             indiv_props[prop] = [p.get(prop, altval) for p in self._proxies]
         return indiv_props
 
-    def _pre_creation(self, ax=None, **kwargs):
+    def _pre_creation(self, ax=None, **props):
         """Ensure all proxies create their own artists."""
+        props = super()._pre_creation(ax=ax, **props)
         self._match_original = False
         for proxy in self._proxies:
-            proxy.create_artist(ax=ax, **kwargs)
+            proxy.create_artist(ax=ax, **props)
             if proxy.is_styled:
                 self._match_original = True
         if self._match_original:
-            self._proxy_props = self.to_element_styling(kwargs)
+            self._proxy_props = self.to_element_styling(props)
         else:
             self._proxy_props = dict()
+        return props
 
     def _init_artist(self, ax):
         """
@@ -1145,10 +1253,8 @@ class _Tag(cm.ScalarMappable):
         proxy_id = id(proxy)
         if proxy_id in self._marked_obj:
             return  # if the proxy was already registered, ignore it
-        if self._mappable is not None:
-            self._mappables[proxy_id] = getattr(proxy, f'get_{self._mappable}')()
-            self.stale = True
         self._marked_obj[proxy_id] = proxy  # remember the proxy
+        self.stale = True
 
     def deregister_proxy(self, proxy):
         proxy_id = id(proxy)
@@ -1160,6 +1266,9 @@ class _Tag(cm.ScalarMappable):
     def _prepare_props(self):
         self._proxy_props = {}
         if self._mappable is not None:
+            for obj_id, proxy in self._marked_obj.items():
+                self._mappables[obj_id] = getattr(proxy,
+                                                  f'get_{self._mappable}')()
             self._update_scalarmappable()
         self.stale = False
 
@@ -1204,8 +1313,9 @@ class SubDiagram:
 
     """
     def __init__(self, x, columns, flows, label=None, yoff=0, hspace=1,
-                 hspace_combine='add', label_margin=(0, 0), layout='centered',
-                 blockprops=None, flowprops=None, tags=None, **kwargs):
+                 hspace_combine='divide', label_margin=(0, 0),
+                 layout='centered', blockprops=None, flowprops=None, tags=None,
+                 **kwargs):
         """
         Parameters
         ----------
@@ -1226,7 +1336,7 @@ class SubDiagram:
         hspace : float, (default=1)
             The height reserved for space between blocks expressed as a
             float in the same unit as the block heights.
-        hspace_combine : {'add', 'divide'}, default: 'add'
+        hspace_combine : {'add', 'divide'}, default: 'divide'
             Set how the vertical space between blocks should be combined.
             If set to 'add' (default) the space between two blocks takes
             the value provided by *hspace*. If set to 'divide' then the sum of
@@ -1269,10 +1379,16 @@ class SubDiagram:
         self._x = _to_valid_arrays(x, 'x')
         self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
-        self._blockprops = blockprops or dict()
-        self._flowprops = flowprops or dict()
-        # props in kwargs, however, not necessarily
-        self._distribute_kwargs(kwargs)
+        _blockprops = dict(blockprops) or dict()
+        self._blockprops = normalize_kwargs(_blockprops, _Block)
+        _flowprops = dict(flowprops) or dict()
+        self._flowprops = normalize_kwargs(_flowprops, _Flow)
+        # TODO: this is only needed because we allow kwargs not just blockprops and flowprops
+        self._distribute_kwargs(kwargs)  # sets 'width' in _blockprops
+        # TODO: remove layout relevant properties (put defaults in rcP?)
+        self._width = self._blockprops.pop('width')
+        self._ha = self._blockprops.pop('horizontalalignment', 'center')
+        print('ha', self._ha)
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1290,8 +1406,8 @@ class SubDiagram:
                 _blocks.extend(column)
                 self._columns.append(column)
         else:
-            for xi, col in zip(x, columns):
-                column = [_Block(size, xa=xi)
+            for col in columns:
+                column = [_Block(size, width=self._width, ha=self._ha)
                           for size in col]
                 self._columns.append(column)
                 _blocks.extend(column)
@@ -1415,6 +1531,18 @@ class SubDiagram:
     def get_x(self):
         """Get the horizontal positioning of the columns"""
         return self._x
+
+    def supplement_x(self, x):
+        """Set the x coordinates."""
+        if self._x is None:
+            if x is None:
+                self._x, self._columns = cbook.index_of(self._columns)
+            else:
+                # set the x values put only use the number of columns
+                self._x = x[:len(self._columns)]
+            for xi, col in zip(self._x, self._columns):
+                for block in col:
+                    block.set_xa(xi)
 
     def set_column_layout(self, col_id, layout):
         """Set the layout for a single column"""
@@ -1695,8 +1823,7 @@ class SubDiagram:
         Check for block/flow specific kwargs and move them to
         block-/flowprops
         """
-        _kwargs = cbook.normalize_kwargs(kwargs,
-                                         _ProxyCollection._artistcls)
+        _kwargs = cbook.normalize_kwargs(kwargs, _ProxyCollection._artistcls)
         cmap = _kwargs.pop('cmap', None)
         if cmap is not None:
             if self._blockprops.get('cmap', None) is None:
@@ -1704,6 +1831,11 @@ class SubDiagram:
                     dict(cmap=cmap, norm=_kwargs.pop('norm', None),
                          mappable=_kwargs.pop('mappable', None))
                 )
+        self._blockprops['width'] = self._blockprops.get('width',
+                                                         kwargs.pop('width',
+                                                                    None))
+        print('distibute, block:', self._blockprops, 'kws:', _kwargs)
+                                                        
         self._kwargs = _kwargs
 
     # TODO: is this still needed? if yes, automate or use _singular_props
@@ -1713,7 +1845,7 @@ class SubDiagram:
         sdkwargs, other_kwargs = dict(), dict()
         sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
                    'hspace_combine', 'label_margin', 'cmap', 'norm',
-                   'mappable', 'blockprops', 'flowprops']
+                   'mappable', 'blockprops', 'flowprops', 'width']
         for k, v in kwargs.items():
             if k in sd_args:
                 sdkwargs[k] = v
@@ -1728,6 +1860,12 @@ class SubDiagram:
             _kwargs = dict(kwargs)
             _kwargs.update(self._kwargs)
             _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
+            # blocks should have their edges drawn, so if only fc is provided
+            # we complete it here. Note that normalize_kwargs is called only
+            # to normalize 'edgecolor' & 'facecolor'
+            _blockkws['edgecolor'] = _blockkws.get('edgecolor',
+                                                   _blockkws.get('facecolor',
+                                                                 None))
             self._blocks.create_artist(ax=ax, **_blockkws)
             # at last make sure the datalimits are updated
             self._update_datalim()
@@ -1739,8 +1877,8 @@ class SubDiagram:
             if self.stale:
                 self.generte_layout()
                 self.create_block_artists(self, ax=ax, **kwargs)
-            _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
-            self._flows.create_artist(ax=ax, **_flowkws)
+            # _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
+            self._flows.create_artist(ax=ax, **_kwargs)
 
 
 class Alluvial:
@@ -1822,10 +1960,6 @@ class Alluvial:
           :meth:`set_blockprops` is called before adding further sub-diagrams.
 
         """
-        if x is not None:
-            self._x = _to_valid_arrays(x, 'x')
-        else:
-            self._x = None
         # create axes if not provided
         if ax is None:
             import matplotlib.pyplot as plt
@@ -1833,6 +1967,12 @@ class Alluvial:
             # TODO: not sure if specifying the ticks is necessary
             ax = fig.add_subplot(1, 1, 1, yticks=[])
         self.ax = ax
+        if x is not None:
+            self._x = _to_valid_arrays(x, 'x')
+            self.ax.xaxis.update_units(self._x)
+
+        else:
+            self._x = None
         # store normalized styling properties
         self._blockprops = cbook.normalize_kwargs(blockprops,
                                                   _ProxyCollection._artistcls)
@@ -1871,7 +2011,7 @@ class Alluvial:
             ext = _kwargs.pop('ext', None)
             # ###
             if flows is not None or ext is not None:
-                label = _kwargs.pop('label', '')
+                label = _kwargs.pop('label', None)
                 fractionflow = _kwargs.pop('fractionflow', False)
                 tags = _kwargs.pop('tags', None)
                 # draw a diagram if *flows* are provided
@@ -1943,8 +2083,8 @@ class Alluvial:
             pass  # TODO: check extout format
         return columns, flows
 
-    def add_memberships(self, memberships, absentval=None, x=None, label=None,
-                        yoff=None, **kwargs):
+    def add_from_memberships(self, memberships, absentval=None, x=None,
+                             label=None, yoff=0, **kwargs):
         """
         Add an new subdiagram from a sequence of membership lists.
 
@@ -2002,7 +2142,8 @@ class Alluvial:
             columns.append(col + ext)
             memship_last = memberships[i]
             nbr_blocks_last = nbr_blocks
-        x, columns = self._determine_x(x, columns)
+        # do not yet handle the x axis
+        # x, columns = self._determine_x(x, columns)
         return self._add(columns, flows, x=x, label=label, yoff=yoff,
                          tags=tags, **kwargs)
 
@@ -2062,11 +2203,15 @@ class Alluvial:
 
     def _inject_default_blockprops(self,):
         """Completing styling properties of blocks with sensible defaults."""
-        self._blockprops['linewidth'] = self._blockprops.get('linewidth', 2.0)
+        # TODO: Note that this overwrites properties passed in kwargs of
+        #       Alluvial.add. > Only allow blockprops and flowprops?
+        # TODO: put values to rcParams
+        self._blockprops['linewidth'] = self._blockprops.get('linewidth', 1.0)
 
     def _inject_default_flowprops(self,):
         """Completing styling properties of flows with sensible defaults."""
         self._flowprops['alpha'] = self._flowprops.get('alpha', 0.7)
+        # TODO: only do this if dcs are colored by tags as > match_original
         self._flowprops['facecolor'] = self._flowprops.get('facecolor',
                                                            'source')
         self._flowprops['linewidth'] = self._flowprops.get('linewidth', 0.0)
@@ -2086,12 +2231,17 @@ class Alluvial:
         # pass the proxy specific here and the artist specific in
         # _create_collection
         _kwargs = dict(self._defaults)
+        print('alluv defaults', _kwargs)
         _kwargs.update(cbook.normalize_kwargs(kwargs,
                                               _ProxyCollection._artistcls))
+        print('after adding from _add(kws)', _kwargs)
         _blockprops = dict(self._blockprops)
-        _blockprops.update(_kwargs.pop('blockprops', {}))
+        _blockprops.update(cbook.normalize_kwargs(_kwargs.pop('blockprops', {}),
+                                                  _ProxyCollection._artistcls))
         _flowprops = dict(self._flowprops)
-        _flowprops.update(_kwargs.pop('flowprops', {}))
+        _flowprops.update(cbook.normalize_kwargs(_kwargs.pop('flowprops', {}),
+                                                 _ProxyCollection._artistcls))
+        print('blockprops on _add', _blockprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
                              yoff=yoff, tags=tags, **_kwargs)
@@ -2264,7 +2414,8 @@ class Alluvial:
         columns, flows = self._to_cols_and_flows(cinit, flows, ext, extout,
                                                  fractionflow)
 
-        x, columns = self._determine_x(x, columns)
+        # do not yet handle x axis
+        # x, columns = self._determine_x(x, columns)
         # TODO: extout are not processed so far
         self._extouts.append(extout)
         return self._add(columns=columns, flows=flows, x=x, label=label,
@@ -2288,6 +2439,22 @@ class Alluvial:
 
     def _create_collections(self):
         """TODO: write docstring."""
+        # handle the x axis
+        x_values = None
+        if self.ax.xaxis.units is None:  # check if conversion might be needed
+            if self._x is not None:
+                self.ax.xaxis.update_units(self._x)
+                x_values = copy(self._x)
+            else:
+                for subd in self._diagrams:
+                    subd_x = subd.get_x()
+                    if subd_x is not None:
+                        self.ax.xaxis.update_units(subd_x)
+                        x_values = copy(subd_x)
+                        break
+        for subd in self._diagrams:
+            subd.supplement_x(x_values)
+
         combined_x = []
         diag_zorder = 4
         subd_defaults = []

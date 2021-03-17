@@ -131,12 +131,12 @@ class TestAlluvialLayout:
             [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
             width=0.2, hspace_combine='divide'
         )
-        a.add_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
-                          layout='top', width=0.2, hspace_combine='divide',
-                          yoff=-2)
-        a.add_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
-                          layout='bottom', width=0.2, hspace_combine='divide',
-                          yoff=2)
+        a.add_form_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
+                               layout='top', width=0.2,
+                               hspace_combine='divide', yoff=-2)
+        a.add_from_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
+                               layout='bottom', width=0.2,
+                               hspace_combine='divide', yoff=2)
         a.finish()
         a.ax.set_xlim(-1, 4)
         a.ax.set_ylim(-4, 8)
@@ -155,19 +155,19 @@ class TestAlluvialStyling:
         # refax
         # draw a simple Recangle on refax
         pc = []
-        pc.append(Rectangle((0, 0), width=1, height=3, **style))
-        pc.append(Rectangle((0, 4), width=1, height=1, **style))
+        pc.append(Rectangle((-0.5, 0), width=1, height=3, **style))
+        pc.append(Rectangle((-0.5, 4), width=1, height=1, **style))
         # custom styling for a single rectangle
         style['ec'] = 'black'
-        pc.append(Rectangle((2, 0), width=1, height=2, fc='red', **style))
+        pc.append(Rectangle((1.5, 0), width=1, height=2, fc='red', **style))
         style['ec'] = 'green'
         refax.add_collection(PatchCollection(pc, match_original=True, zorder=4))
         # ###
         # tesax
         # draw an alluvial with 1 diagram 2 cols, 3 blocks and no flows
-        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1)
+        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, ha='center')
         diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
-                                **style)
+                                blockprops=style)
         # set the styling of a single block
         block = diagram0.get_block((1, 0))  # column 1, block 0
         block.set_facecolor('red')
@@ -198,18 +198,18 @@ class TestAlluvialStyling:
         # refax
         pc = []
         # Alluvial style
-        pc.append(Rectangle((0, yoff), width=1, height=1, fc=alluv_c, **style))
+        pc.append(Rectangle((-.5, yoff), width=1, height=1, fc=alluv_c, **style))
         # SubD style
-        pc.append(Rectangle((0, 0), width=1, height=3, fc=subd_c, **style))
+        pc.append(Rectangle((-0.5, 0), width=1, height=3, fc=subd_c, **style))
         # Tag style
-        pc.append(Rectangle((2, 0), width=1, height=3, fc=tag_c, **style))
+        pc.append(Rectangle((1.5, 0), width=1, height=3, fc=tag_c, **style))
         # Block style
-        pc.append(Rectangle((2, yoff), width=1, height=1, fc=block_c, **style))
+        pc.append(Rectangle((1.5, yoff), width=1, height=1, fc=block_c, **style))
         refax.add_collection(PatchCollection(pc, match_original=True))
         # ###
         # texax
         # set fc to blue for the entire alluvial plot
-        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc=alluv_c, **style)
+        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc=alluv_c, blockprops=style)
         # Test defaults form Alluvial:
         alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom', **style)
         # Test SubD > Alluvial:
@@ -272,15 +272,16 @@ class TestAlluvialStyling:
         # ###
         # texax
         tesax = fig_test.subplots()
-        alluv = Alluvial(x=x, ax=tesax, layout='bottom', **style)
+        style['ha'] = 'left'
+        alluv = Alluvial(x=x, ax=tesax, layout='bottom', blockprops=style)
         alluv.add(flows=None, ext=[*zip(heights[:3], heights[3:6])],
-                  fc=single_c, **style)
+                  fc=single_c)
         # create a tag for the reds
         alluv.register_tag('tag0', cmap=blues, mappable='x')
         # alluv.register_tag('tag0')
         alluv.tag_blocks('tag0', 0, None, -1)  # get top block in all cols
         alluv.add(flows=None, ext=[*zip(heights[6:])], cmap=reds,
-                  mappable='x', yoff=7, **style)
+                  mappable='x', yoff=7)
         alluv.finish()
         # ###
         # set common limits and axis styling

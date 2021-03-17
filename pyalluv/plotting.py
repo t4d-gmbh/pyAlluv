@@ -8,6 +8,7 @@ from weakref import WeakValueDictionary
 import numpy as np
 import matplotlib as mpl
 from matplotlib.cbook import index_of
+from matplotlib.cbook import normalize_kwargs as normed_kws
 from matplotlib.collections import PatchCollection
 # from matplotlib import docstring
 from matplotlib import _api, cbook, cm
@@ -63,7 +64,26 @@ def _to_valid_arrays(data, attribute, dtype=None):
 
 
 def _memship_to_column(membership, absentval=None):
-    """TODO: write docstring"""
+    """
+    Convert a membership list into a column for an Alluvial diagram.
+
+    Parameters
+    ----------
+    membership : array-like
+        Associates individuals (typically a node in a network) to a group
+        or class. The position in *membership* identifies an individual and
+        the value the class or group it is associated to.
+    absentval : scalar or None
+        A specific value to indicate that a individual is not associated to any
+        group or class.
+
+    Returns
+    -------
+    nbr_blocks : int
+        The number of groups or classes.
+    column : array-like
+        Column of individual count in each group or class.
+    """
     if absentval in (None, np.nan):
         _mask = ~np.isnan(membership)
     else:
@@ -78,12 +98,41 @@ def _memship_to_column(membership, absentval=None):
     return nbr_blocks, col
 
 
-def _between_memships_flow(flow_dims, membership_last, membership_next,
+def _between_memships_flow(flow_dims, membership, membership_next,
                            absentval=None):
-    """TODO: write docstring"""
+    """
+    Return a flow matrix from *membership* to *membership_next* along with a
+    potential external inflow to the latter membership list. As external inflow
+    we consider individuals with *absentval* in the first membership list.
+
+    Parameters
+    ----------
+    flow_dims : tuple[int, int]
+        The number of groups in *membership_next* and *membership_last*.
+    membership : array-like
+        Group (or class) association of individual. The position identifies an
+        individual and the value the class or group it is associated to.
+    membership_next : array
+        2nd membership list.
+    absentval : scalar or None
+        A specific value to indicate that a individual is not associated to any
+        group or class.
+
+    Returns
+    -------
+    flowmatrix : 2darray
+        Flowmatrix between two membership lists.
+    ext : array
+        Count the number of individuals only present in *membership_next* per
+        group or class.
+
+
+    Note that the index must match between the two membership lists such that
+    the first element in both lists corresponds to the same individual.
+    """
     ext = np.zeros(flow_dims[0])
     flowmatrix = np.zeros(flow_dims, dtype=int)
-    for m1, m2 in zip(membership_last.astype(int),
+    for m1, m2 in zip(membership.astype(int),
                       membership_next.astype(int)):
         if m1 == absentval:  # node was absent in last
             if m2 != absentval:  # node is present in next
@@ -94,21 +143,12 @@ def _between_memships_flow(flow_dims, membership_last, membership_next,
             if m2 != absentval:  # node is present in both
                 flowmatrix[m2, m1] += 1
             else:  # node is absent in next
-                # TODO: handle outflows?
-                pass
+                pass  # currently these generate no visual effects
     return flowmatrix, ext
 
 
-def _update_limits(limits, newmin, newmax):
-    """TODO: write docstring"""
-    if limits is None:
-        return newmin, newmax
-    omin, omax = limits
-    return min(omin, newmin), max(omax, newmax)
-
-
-def _separate_selector(selector):
-    """TODO: write docstring"""
+def _separate_selector(*selector):
+    """Returns slices based on the passed selectors."""
     nbr_args = len(selector)
     # convert all input to slices
 
@@ -122,150 +162,7 @@ def _separate_selector(selector):
         else:
             return slice(*arg)
     selector = [_to_slice(arg) for arg in selector]
-    if nbr_args == 1:
-        _subdselect = slice(None, None)
-        _colselect = slice(None, None)
-        _bselect = selector[0]
-    elif nbr_args == 2:
-        _subdselect = slice(None, None)
-        _colselect = selector[0]
-        _bselect = selector[1]
-    elif nbr_args == 3:
-        _subdselect = selector[0]
-        _colselect = selector[1]
-        _bselect = selector[2]
-    return _subdselect, _colselect, _bselect
-
-
-def to_canonical(alias_mapping=None):
-    """
-    Provides a function that converts property names to their canonical name
-    based on *alias_mapping*
-    """
-    # NOTE: this is simply a part of cbook.normalize_kwargs and could be
-    # moved and used in cbook directly
-    if alias_mapping is None:
-        alias_mapping = dict()
-    elif (isinstance(alias_mapping, type) and
-          issubclass(alias_mapping, Artist) or
-          isinstance(alias_mapping, Artist)):
-        alias_mapping = getattr(alias_mapping, "_alias_map", {})
-
-    _to_canonical = {alias: canonical
-                     for canonical, alias_list in alias_mapping.items()
-                     for alias in alias_list}
-
-    def _get(name):
-        """Returns the canonical name of *name*"""
-        return _to_canonical.get(name, name)
-    return _get
-
-
-# NOTE: this is copy/paste form cbook with 1 exception: (line with _artistcls)
-def normalize_kwargs(kw, alias_mapping=None, required=(), forbidden=(),
-                     allowed=None):
-    """
-    Helper function to normalize kwarg inputs.
-
-    The order they are resolved are:
-
-    1. aliasing
-    2. required
-    3. forbidden
-    4. allowed
-
-    This order means that only the canonical names need appear in
-    *allowed*, *forbidden*, *required*.
-
-    Parameters
-    ----------
-    kw : dict or None
-        A dict of keyword arguments.  None is explicitly supported and treated
-        as an empty dict, to support functions with an optional parameter of
-        the form ``props=None``.
-
-    alias_mapping : dict or Artist subclass or Artist instance, optional
-        A mapping between a canonical name to a list of
-        aliases, in order of precedence from lowest to highest.
-
-        If the canonical value is not in the list it is assumed to have
-        the highest priority.
-
-        If an Artist subclass or instance is passed, use its properties alias
-        mapping.
-
-    required : list of str, optional
-        A list of keys that must be in *kws*.  This parameter is deprecated.
-
-    forbidden : list of str, optional
-        A list of keys which may not be in *kw*.  This parameter is deprecated.
-
-    allowed : list of str, optional
-        A list of allowed fields.  If this not None, then raise if
-        *kw* contains any keys not in the union of *required*
-        and *allowed*.  To allow only the required fields pass in
-        an empty tuple ``allowed=()``.  This parameter is deprecated.
-
-    Raises
-    ------
-    TypeError
-        To match what python raises if invalid args/kwargs are passed to
-        a callable.
-    """
-    from matplotlib.artist import Artist
-
-    if kw is None:
-        return {}
-
-    # deal with default value of alias_mapping
-    if alias_mapping is None:
-        alias_mapping = dict()
-    elif (isinstance(alias_mapping, type) and issubclass(alias_mapping, Artist)
-          or isinstance(alias_mapping, Artist)
-          or issubclass(getattr(alias_mapping, '_artistcls', None), Artist)):  # only modif is this line
-        alias_mapping = getattr(alias_mapping, "_alias_map", {})
-
-    to_canonical = {alias: canonical
-                    for canonical, alias_list in alias_mapping.items()
-                    for alias in alias_list}
-    canonical_to_seen = {}
-    ret = {}  # output dictionary
-
-    for k, v in kw.items():
-        canonical = to_canonical.get(k, k)
-        if canonical in canonical_to_seen:
-            raise TypeError(f"Got both {canonical_to_seen[canonical]!r} and "
-                            f"{k!r}, which are aliases of one another")
-        canonical_to_seen[canonical] = k
-        ret[canonical] = v
-
-    fail_keys = [k for k in required if k not in ret]
-    if fail_keys:
-        raise TypeError("The required keys {keys!r} "
-                        "are not in kwargs".format(keys=fail_keys))
-
-    fail_keys = [k for k in forbidden if k in ret]
-    if fail_keys:
-        raise TypeError("The forbidden keys {keys!r} "
-                        "are in kwargs".format(keys=fail_keys))
-
-    if allowed is not None:
-        allowed_set = {*required, *allowed}
-        fail_keys = [k for k in ret if k not in allowed_set]
-        if fail_keys:
-            raise TypeError(
-                "kwargs contains {keys!r} which are not in the required "
-                "{req!r} or allowed {allow!r} keys".format(
-                    keys=fail_keys, req=required, allow=allowed))
-
-    return ret
-
-
-def _include_artist_alias_map(cls):
-    artistcls_aliases = dict(getattr(cls._artistcls, "_alias_map", {}))
-    artistcls_aliases.update(getattr(cls, '_alias_map', {}))
-    cls._alias_map = artistcls_aliases
-    return cls
+    return (3 - nbr_args) * [slice(None, None)] + selector
 
 
 def _expose_artist_getters_and_setters(cls):
@@ -273,6 +170,10 @@ def _expose_artist_getters_and_setters(cls):
     Wrapper that exposes all setters and getters from a subclass of Artist in
     order to create a functional proxy class.
     """
+    alias_mapping = getattr(cls._artistcls, "_alias_map", {})
+    to_canonical = {alias: canonical for canonical, alias_list in
+                    alias_mapping.items() for alias in alias_list}
+
     def make_proxy_getter(name):  # Enforce a closure over *name*.
         @functools.wraps(getattr(cls._artistcls, name))
         def method(self, *args, **kwargs):
@@ -294,7 +195,8 @@ def _expose_artist_getters_and_setters(cls):
     def make_proxy_setter(name, argnames):  # Enforce a closure over *name*.
         @functools.wraps(getattr(cls._artistcls, name))
         def method(self, *args, **kwargs):
-            prop = cls.to_canonical(name.replace("set_", ""))
+            _prop = name.replace("set_", "")
+            prop = to_canonical.get(_prop, _prop)
             if prop in ('facecolor', 'edgecolor', 'linewidth', 'linestyle',
                         'antialiased'):
                 self._is_styled = True  # set a flag for individual styling
@@ -397,12 +299,11 @@ class _ArtistProxy:
         """
         self._tag_props = dict()
         for tag in self._tags:
-            _tag_props = cbook.normalize_kwargs(tag.get_props(id(self)),
-                                                self._artistcls)
+            _tag_props = normed_kws(tag.get_props(id(self)), self._artistcls)
             self._tag_props.update(_tag_props)
 
     def update(self, **props):
-        # props = cbook.normalize_kwargs(props, self._artistcls)
+        # props = normed_kws(props, self._artistcls)
         for prop, value in props.items():
             setter = getattr(self, f"set_{prop}", None)
             if callable(setter):
@@ -481,7 +382,7 @@ class _ArtistProxy:
 
     def create_artist(self, ax, **kwargs):
         """Create the artist of this proxy."""
-        props = cbook.normalize_kwargs(kwargs, self._artistcls)
+        props = normed_kws(kwargs, self._artistcls)
         props = self._pre_creation(ax=ax, **props)  # run prepare callback
         props, _nonappl_props = self._applicable(props)
         self._init_artist(ax)                  # initiate artist with defaults
@@ -499,7 +400,6 @@ class _ArtistProxy:
         return self._artist
 
 
-@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 @cbook._define_aliases({"verticalalignment": ["va"],
                         "horizontalalignment": ["ha"], "width": ["w"],
@@ -514,7 +414,6 @@ class _Block(_ArtistProxy):
         `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
     """
     _artistcls = Rectangle
-    to_canonical = to_canonical(_artistcls)
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
@@ -903,14 +802,12 @@ class _Block(_ArtistProxy):
             self._set_flow_locations(out)
 
 
-@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 class _Flow(_ArtistProxy):
     """
     A connection between two blocks from adjacent columns.
     """
     _artistcls = patches.PathPatch
-    to_canonical = to_canonical(_artistcls)
 
     def __init__(self, flow, source=None, target=None, label=None, tags=None,
                  **kwargs):
@@ -1088,14 +985,12 @@ class _Flow(_ArtistProxy):
         self._artist.update(kwargs)
 
 
-@_include_artist_alias_map
 @_expose_artist_getters_and_setters
 class _ProxyCollection(_ArtistProxy):
     """
     A collection of _ArtistProxy with common styling properties.
     """
     _artistcls = PatchCollection
-    to_canonical = to_canonical(_artistcls)
     _singular_props = ['zorder', 'hatch', 'pickradius', 'capstyle',
                        'joinstyle', 'cmap', 'norm']
 
@@ -1126,7 +1021,7 @@ class _ProxyCollection(_ArtistProxy):
 
     def to_element_styling(self, styleprops: dict):
         """Convert the styling properties to lists matching self._proxies."""
-        _styprops = cbook.normalize_kwargs(styleprops, self._artistcls)
+        _styprops = normed_kws(styleprops, self._artistcls)
         indiv_props = {sp: _styprops.pop(sp)
                        for sp in self._singular_props if sp in _styprops}
         for prop, altval in _styprops.items():
@@ -1184,9 +1079,9 @@ class _ProxyCollection(_ArtistProxy):
         # ###
         self._artist = ax.add_collection(self._artist)
 
-    # def add_proxy(self, proxy):
-    #     """Add a Proxy."""
-    #     self._proxies.append(proxy)
+    def add_proxy(self, proxy):
+        """Add a Proxy."""
+        self._proxies.append(proxy)
 
 
 class _Tag(cm.ScalarMappable):
@@ -1380,15 +1275,15 @@ class SubDiagram:
         self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
         _blockprops = dict(blockprops) or dict()
-        self._blockprops = normalize_kwargs(_blockprops, _Block)
+        self._blockprops = normed_kws(_blockprops, _Block._artistcls)
         _flowprops = dict(flowprops) or dict()
-        self._flowprops = normalize_kwargs(_flowprops, _Flow)
+        self._flowprops = normed_kws(_flowprops, _Flow._artistcls)
         # TODO: this is only needed because we allow kwargs not just blockprops and flowprops
         self._distribute_kwargs(kwargs)  # sets 'width' in _blockprops
         # TODO: remove layout relevant properties (put defaults in rcP?)
         self._width = self._blockprops.pop('width')
-        self._ha = self._blockprops.pop('horizontalalignment', 'center')
-        print('ha', self._ha)
+        self._ha = self._blockprops.pop('ha', 'center')
+        self._va = self._blockprops.pop('va', 'center')
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1407,7 +1302,7 @@ class SubDiagram:
                 self._columns.append(column)
         else:
             for col in columns:
-                column = [_Block(size, width=self._width, ha=self._ha)
+                column = [_Block(size, width=self._width, ha=self._ha, va=self._va)
                           for size in col]
                 self._columns.append(column)
                 _blocks.extend(column)
@@ -1579,11 +1474,11 @@ class SubDiagram:
         # TODO: move columns vert. to minimize vertical comp. flows attached
         self.stale = False
 
-    # def add_block(self, column: int, block):
-    #     """Add a Block to a column."""
-    #     self._blocks.add_proxy(block)
-    #     self._columns[column].append(block)
-    #     self.stale = True
+    def add_block(self, column: int, block):
+        """Add a Block to a column."""
+        self._blocks.add_proxy(block)
+        self._columns[column].append(block)
+        self.stale = True
 
     # def add_flow(self, column, flow):
     #     """TODO: write docstring."""
@@ -1823,7 +1718,7 @@ class SubDiagram:
         Check for block/flow specific kwargs and move them to
         block-/flowprops
         """
-        _kwargs = cbook.normalize_kwargs(kwargs, _ProxyCollection._artistcls)
+        _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
         cmap = _kwargs.pop('cmap', None)
         if cmap is not None:
             if self._blockprops.get('cmap', None) is None:
@@ -1835,7 +1730,7 @@ class SubDiagram:
                                                          kwargs.pop('width',
                                                                     None))
         print('distibute, block:', self._blockprops, 'kws:', _kwargs)
-                                                        
+
         self._kwargs = _kwargs
 
     # TODO: is this still needed? if yes, automate or use _singular_props
@@ -1859,7 +1754,7 @@ class SubDiagram:
                 self.generate_layout()
             _kwargs = dict(kwargs)
             _kwargs.update(self._kwargs)
-            _blockkws = cbook.normalize_kwargs(_kwargs, self._blocks._artistcls)
+            _blockkws = normed_kws(_kwargs, self._blocks._artistcls)
             # blocks should have their edges drawn, so if only fc is provided
             # we complete it here. Note that normalize_kwargs is called only
             # to normalize 'edgecolor' & 'facecolor'
@@ -1877,7 +1772,7 @@ class SubDiagram:
             if self.stale:
                 self.generte_layout()
                 self.create_block_artists(self, ax=ax, **kwargs)
-            # _flowkws = cbook.normalize_kwargs(_kwargs, self._flows._artistcls)
+            # _flowkws = normed_kws(_kwargs, self._flows._artistcls)
             self._flows.create_artist(ax=ax, **_kwargs)
 
 
@@ -1974,10 +1869,8 @@ class Alluvial:
         else:
             self._x = None
         # store normalized styling properties
-        self._blockprops = cbook.normalize_kwargs(blockprops,
-                                                  _ProxyCollection._artistcls)
-        self._flowprops = cbook.normalize_kwargs(flowprops,
-                                                 _ProxyCollection._artistcls)
+        self._blockprops = normed_kws(blockprops, _ProxyCollection._artistcls)
+        self._flowprops = normed_kws(flowprops, _ProxyCollection._artistcls)
         # nothing to set for blocks for now
         self._inject_default_blockprops()
         self._inject_default_flowprops()
@@ -1994,8 +1887,7 @@ class Alluvial:
         self.max_nbr_xticks = 10
         self._defaults = dict()
 
-        _kwargs = cbook.normalize_kwargs(kwargs,
-                                         _ProxyCollection._artistcls)
+        _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
         fc = _kwargs.get('facecolor', None)
         if fc is None:
             self._color_cycler = itertools.cycle(
@@ -2128,19 +2020,18 @@ class Alluvial:
         #         pass
         columns, flows = [], []
         # process the first membership list
-        memship_last = memberships[0]
-        nbr_blocks_last, col = _memship_to_column(memship_last, absentval)
+        membership_current = memberships[0]
+        nbr_blocks_last, col = _memship_to_column(membership_current, absentval)
         columns, flows = [col], []
         for i in range(1, len(memberships)):
             # create the flow matrix
             nbr_blocks, col = _memship_to_column(memberships[i])
-            flow_dims = (nbr_blocks, nbr_blocks_last)
-            flow, ext = _between_memships_flow(flow_dims, memship_last,
-                                               memberships[i])
+            dims = (nbr_blocks, nbr_blocks_last)
+            flow, ext = _between_memships_flow(dims, membership_current, memberships[i])
             flows.append(flow)
             # add ext to the column and append to the columns
             columns.append(col + ext)
-            memship_last = memberships[i]
+            membership_current = memberships[i]
             nbr_blocks_last = nbr_blocks
         # do not yet handle the x axis
         # x, columns = self._determine_x(x, columns)
@@ -2232,15 +2123,14 @@ class Alluvial:
         # _create_collection
         _kwargs = dict(self._defaults)
         print('alluv defaults', _kwargs)
-        _kwargs.update(cbook.normalize_kwargs(kwargs,
-                                              _ProxyCollection._artistcls))
+        _kwargs.update(normed_kws(kwargs, _ProxyCollection._artistcls))
         print('after adding from _add(kws)', _kwargs)
         _blockprops = dict(self._blockprops)
-        _blockprops.update(cbook.normalize_kwargs(_kwargs.pop('blockprops', {}),
-                                                  _ProxyCollection._artistcls))
+        _blockprops.update(normed_kws(_kwargs.pop('blockprops', {}),
+                                      _ProxyCollection._artistcls))
         _flowprops = dict(self._flowprops)
-        _flowprops.update(cbook.normalize_kwargs(_kwargs.pop('flowprops', {}),
-                                                 _ProxyCollection._artistcls))
+        _flowprops.update(normed_kws(_kwargs.pop('flowprops', {}),
+                                     _ProxyCollection._artistcls))
         print('blockprops on _add', _blockprops)
         diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
@@ -2469,8 +2359,10 @@ class Alluvial:
                                          **defaults)
             combined_x.extend(diagram.get_x().tolist())
             _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
-            self._xlim = _update_limits(self._xlim, _xmin, _xmax)
-            self._ylim = _update_limits(self._ylim, _ymin, _ymax)
+            self._xlim = (_xmin, _xmax) if self._xlim is None \
+                else (min(self._xlim[0], _xmin), max(self._xlim[1], _xmax))
+            self._ylim = (_ymin, _ymax) if self._ylim is None \
+                else (min(self._ylim[0], _ymin), max(self._ylim[1], _ymax))
         diag_zorder -= diag_zorder
         # ###
         # TODO: first draw the inter sub-diagram flows (corss-flows)
@@ -2561,7 +2453,7 @@ class Alluvial:
         """
         raise NotImplementedError('To be implemented')
 
-    def update_blocks(self, selector, **kwargs):
+    def update_blocks(self, *selector, **kwargs):
         """
         Update the properties of a selection of blocks.
         For details on the *selector* refer to :meth:`.select_blocks`.
@@ -2569,10 +2461,10 @@ class Alluvial:
         # select the subdiagrams
         # monitor stale of these subds
         # for each pass rest of selector and kwargs
-        subdselect, colselect, blockselect = _separate_selector(selector)
+        subdsel, colsel, blocksel = _separate_selector(*selector)
         _subd_stale = False
-        for diagram in self._diagrams[subdselect]:
-            is_stale = diagram.update_blocks(colselect, blockselect, **kwargs)
+        for diagram in self._diagrams[subdsel]:
+            is_stale = diagram.update_blocks(colsel, blocksel, **kwargs)
             # TODO: this is likely not done...
             _subd_stale = _subd_stale or is_stale
 
@@ -2608,11 +2500,11 @@ class Alluvial:
         Therefore, `select_blocks` might be difficult to use on columns with
         the layouts `'centered'` and `'optimized'`.
         """
-        subdselect, colselect, blockselect = _separate_selector(selector)
+        subdsel, colsel, blocksel = _separate_selector(*selector)
         blocks = []
-        for diagram in self._diagrams[subdselect]:
-            for col in diagram[colselect]:
-                blocks.extend(col[blockselect])
+        for diagram in self._diagrams[subdsel]:
+            for col in diagram[colsel]:
+                blocks.extend(col[blocksel])
         return blocks
 
     def tag_blocks(self, tag, *args):

@@ -1382,6 +1382,18 @@ class SubDiagram:
     def get_blocks(self):
         return self._blocks
 
+    def get_ylim(self,):
+        if self.stale:
+            self.generate_layout()
+        return self._ylim
+
+    def get_minwidth(self,):
+        mwidth = self._blocks[0].get_width()
+        for col in self._columns:
+            for block in col:
+                mwidth = min(mwidth, block.get_width())
+        return mwidth
+
     def get_datalim(self,):
         """Returns the limits in data units (x0, y0, x1, y1)."""
         if self.stale:
@@ -1394,7 +1406,8 @@ class SubDiagram:
         """Returns the data limit with sensible margins added."""
         xmin, ymin, xmax, ymax = self.get_datalim()
         # TODO: set x margin (for now just 1%)
-        xmargin = 0.01 * (max(self._x) - min(self._x))
+        minwidth = self.get_minwidth()
+        xmargin = max(0.5 * minwidth, 0.01 * (max(self._x) - min(self._x)))
         if self._hspace_combine == 'add':
             ymargin = self._hspace
         else:
@@ -2358,11 +2371,7 @@ class Alluvial:
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
                                          **defaults)
             combined_x.extend(diagram.get_x().tolist())
-            _xmin, _ymin, _xmax, _ymax = diagram.get_visuallim()
-            self._xlim = (_xmin, _xmax) if self._xlim is None \
-                else (min(self._xlim[0], _xmin), max(self._xlim[1], _xmax))
-            self._ylim = (_ymin, _ymax) if self._ylim is None \
-                else (min(self._ylim[0], _ymin), max(self._ylim[1], _ymax))
+            print('set alluv minmax', self._xlim)
         diag_zorder -= diag_zorder
         # ###
         # TODO: first draw the inter sub-diagram flows (corss-flows)
@@ -2375,12 +2384,26 @@ class Alluvial:
             diagram.create_flow_artists(ax=self.ax, zorder=diag_zorder,
                                         **defaults)
 
-    def _collect_x_positions(self):
+    def determine_viewlim(self):
+        lims = [None, None, None, None]
+        extr = [min, min, max, max]
+        for diagram in self._diagrams:
+            _lims = diagram.get_visuallim()
+            for i, lim in enumerate(lims):
+                lims[i] = _lims[i] if lim is None else extr[i](lim, _lims[i])
+        return lims
+
+    def x_collected(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
-        combined_x = []
+        combined_x = self._x.tolist() or []
+        print('diagrams:', self._diagrams)
         for diagram in self._diagrams:
             combined_x.extend(diagram.get_x().tolist())
-        return sorted(set(combined_x))
+            _ymin, _ymax = diagram.get_ylim()
+            self._ylim = (_ymin, _ymax) if self._ylim is None \
+                else (min(self._ylim[0], _ymin), max(self._ylim[1], _ymax))
+        self._xlim = min(combined_x), max(combined_x)
+        return list(sorted(set(combined_x)))
 
     def finish(self,):
         """Draw the Alluvial diagram."""
@@ -2392,7 +2415,7 @@ class Alluvial:
         # do some styling of the axes
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')
-        x_positions = self._collect_x_positions()
+        x_positions = self.x_collected()
         x0 = cbook.safe_first_element(x_positions)
         if isinstance(x0, datetime):
             majloc = self.ax.xaxis.set_major_locator(AutoDateLocator())
@@ -2401,8 +2424,9 @@ class Alluvial:
             self.ax.xaxis.set_major_locator(
                 mticker.FixedLocator(x_positions, self.max_nbr_xticks - 1)
             )
-        self.ax.set_xlim(*self._xlim)
-        self.ax.set_ylim(*self._ylim)
+        xmin, ymin, xmax, ymax = self.determine_viewlim()
+        self.ax.set_xlim(xmin, xmax)
+        self.ax.set_ylim(ymin, ymax)
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd

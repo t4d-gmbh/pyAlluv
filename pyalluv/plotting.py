@@ -2123,6 +2123,7 @@ class Alluvial:
     def get_defaults(self,):
         """TODO: write docstring."""
         self._defaults['facecolor'] = next(self._color_cycler)['color']
+        self._defaults['edgecolor'] = self._defaults['facecolor']
         return self._defaults
 
     def _add(self, columns, flows, x, label, yoff, tags=None, **kwargs):

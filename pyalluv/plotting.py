@@ -706,6 +706,8 @@ class _Block(_ArtistProxy):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
         self.handle_flows()
+        x0, y0, width, height = self.get_bbox().bounds
+        Bbox.__init__(self, [[x0, x0 + width], [y0, y0 + height]])
     # ###
 
     def _request_loc(self, out: bool, width, out_pref, in_pref):
@@ -2359,7 +2361,6 @@ class Alluvial:
         for subd in self._diagrams:
             subd.supplement_x(x_values)
 
-        combined_x = []
         diag_zorder = 4
         subd_defaults = []
         for diagram in self._diagrams:
@@ -2371,7 +2372,6 @@ class Alluvial:
             # make it a property of Alluvial...
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
                                          **defaults)
-            combined_x.extend(diagram.get_x().tolist())
             print('set alluv minmax', self._xlim)
         diag_zorder -= diag_zorder
         # ###
@@ -2394,12 +2394,20 @@ class Alluvial:
                 lims[i] = _lims[i] if lim is None else extr[i](lim, _lims[i])
         return lims
 
+    def convert_x(self, x=None):
+        if x is None:
+            return []
+        elif self.ax.xaxis.units is None:
+            return x
+        else:
+            return self.ax.xaxis.convert_units(x)
+
     def x_collected(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
-        combined_x = self._x.tolist() or []
+        combined_x = self.convert_x(self._x).tolist()
         print('diagrams:', self._diagrams)
         for diagram in self._diagrams:
-            combined_x.extend(diagram.get_x().tolist())
+            combined_x.extend(self.convert_x(diagram.get_x()).tolist())
             _ymin, _ymax = diagram.get_ylim()
             self._ylim = (_ymin, _ymax) if self._ylim is None \
                 else (min(self._ylim[0], _ymin), max(self._ylim[1], _ymax))

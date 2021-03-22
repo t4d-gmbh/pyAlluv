@@ -180,6 +180,8 @@ class TestAlluvialStyling:
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        refax.set(frame_on=False)
+        refax.set(yticks=[])
         plt.close('all')
 
     @check_figures_equal()
@@ -232,6 +234,8 @@ class TestAlluvialStyling:
         refax.set_xlim(*tesax.get_xlim())
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
+        refax.set(frame_on=False)
+        refax.set(yticks=[])
         plt.close('all')
 
     @check_figures_equal(extensions=('pdf',))
@@ -290,4 +294,6 @@ class TestAlluvialStyling:
         refax.set_ylim(*tesax.get_ylim())
         refax.xaxis.set_major_locator(tesax.xaxis.get_major_locator())
         refax.xaxis.set_major_formatter(tesax.xaxis.get_major_formatter())
+        refax.set(frame_on=False)
+        refax.set(yticks=[])
         plt.close('all')

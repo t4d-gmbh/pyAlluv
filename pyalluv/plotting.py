@@ -707,7 +707,6 @@ class _Block(_ArtistProxy):
             self._artist.set_edgecolor(fc)
         self.handle_flows()
         x0, y0, width, height = self.get_bbox().bounds
-        Bbox.__init__(self, [[x0, x0 + width], [y0, y0 + height]])
     # ###
 
     def _request_loc(self, out: bool, width, out_pref, in_pref):
@@ -1486,7 +1485,21 @@ class SubDiagram:
         for col_id in range(self._nbr_columns):
             # TODO: handle the layout parameter
             self._distribute_blocks(col_id)
-        # TODO: move columns vert. to minimize vertical comp. flows attached
+        # now check if some columns are optimized
+        if any(layout == 'optimized' for layout in self._layout):
+            optimizing_col = [i for i, layout in enumerate(self._layout)
+                              if layout == 'optimized']
+            for col_id in optimizing_col:
+                # # now sort again considering the flows.
+                self._decrease_flow_distances(col_id)
+            for col_id in optimizing_col:
+                # # perform pairwise swapping for backwards flows
+                self._pairwise_swapping(col_id)
+            for col_id in optimizing_col[::-1]:
+                # # perform pairwise swapping for backwards flows
+                self._pairwise_swapping(col_id)
+                # raise NotImplementedError("The optimized layout is not yet"
+                #                          " implemented")
         self.stale = False
 
     def add_block(self, column: int, block):
@@ -1564,15 +1577,6 @@ class SubDiagram:
                 # update the ordering the update the y coords
                 self._reorder_column(col_id, ordering)
                 self._update_ycoords(col_id, col_hspace, layout)
-                # ###
-                # TODO: both methods below need to be checked
-                if layout == 'optimized':
-                    # # now sort again considering the flows.
-                    # self._decrease_flow_distances(col_id)
-                    # # perform pairwise swapping for backwards flows
-                    # self._pairwise_swapping(col_id)
-                    raise NotImplementedError("The optimized layout is not yet"
-                                              " implemented")
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
@@ -1600,8 +1604,8 @@ class SubDiagram:
                         for i in range(len(weights))
                     ]) / sum(weights))
             if _redistribute:
-                sort_key = [bisect_left(old_mid_heights, col.get_yc())
-                            for col in _column]
+                sort_key = [bisect_left(old_mid_heights, block.get_yc())
+                            for block in _column]
                 cs, _sort_key = zip(
                     *sorted(zip(list(range(nbr_blocks)), sort_key,),
                             key=lambda x: x[1])
@@ -1629,13 +1633,15 @@ class SubDiagram:
                     _column[i - 1], _column[i] = b2, b1
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
-                b1 = _column[nbr_blocks - i - 1]
-                b2 = _column[nbr_blocks - i]
-                if self._swap_blocks((b1, b2), col_hspace, 'backwards'):
+                b1, b2 = _column[i - 1], _column[i]
+                # b1 = _column[nbr_blocks - i - 1]
+                # b2 = _column[nbr_blocks - i]
+                if self._swap_blocks((b1, b2), col_hspace, 'forwards'):
                     b2.set_y(b1.get_y())
                     b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
-                    _column[nbr_blocks - i - 1] = b2
-                    _column[nbr_blocks - i] = b1
+                    _column[i - 1], _column[i] = b2, b1
+                    # _column[nbr_blocks - i - 1] = b2
+                    # _column[nbr_blocks - i] = b1
         self.stale = True
 
     def _reorder_column(self, col_id, ordering):
@@ -2079,7 +2085,9 @@ class Alluvial:
         list must be derived from an enumeration of the groups.
 
         """
-        alluvial = Alluvial(x=x)
+        ax = kwargs.pop('ax', None)
+        alluvial = Alluvial(x=x, ax=ax)
+
         if dcs is not None:
             dcs = _to_valid_arrays(dcs, 'dcs', np.int)
             if separate_dcs:
@@ -2105,6 +2113,7 @@ class Alluvial:
         else:
             alluvial._from_membership(memberships, absentval, label=label,
                                       yoff=yoff, **kwargs)
+        alluvial.finish()
         return alluvial
 
     def _inject_default_blockprops(self,):
@@ -2396,9 +2405,9 @@ class Alluvial:
 
     def convert_x(self, x=None):
         if x is None:
-            return []
+            return np.array([])
         elif self.ax.xaxis.units is None:
-            return x
+            return np.array(x)
         else:
             return self.ax.xaxis.convert_units(x)
 
@@ -2436,6 +2445,8 @@ class Alluvial:
         xmin, ymin, xmax, ymax = self.determine_viewlim()
         self.ax.set_xlim(xmin, xmax)
         self.ax.set_ylim(ymin, ymax)
+        self.ax.set(frame_on=False)
+        self.ax.set(yticks=[])
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd

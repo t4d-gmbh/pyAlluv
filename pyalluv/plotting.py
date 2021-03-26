@@ -1122,8 +1122,6 @@ class _Tag(cm.ScalarMappable):
         # QuadMesh can map 2d arrays (but pcolormesh supplies 1d array)
         if self._A.ndim > 1:
             raise ValueError('Collections can only map rank 1 arrays')
-        if not self._check_update("array"):
-            return
         if np.iterable(self._alpha):
             if self._alpha.size != self._A.size:
                 raise ValueError(f'Data array shape, {self._A.shape} '
@@ -1208,7 +1206,7 @@ class SubDiagram:
     A collection of Blocks and Flows belonging to a diagram.
 
     """
-    def __init__(self, x, columns, flows, label=None, yoff=0, hspace=1,
+    def __init__(self, columns, flows, x=None, label=None, yoff=0, hspace=1,
                  hspace_combine='divide', label_margin=(0, 0),
                  layout='centered', blockprops=None, flowprops=None, tags=None,
                  **kwargs):
@@ -1754,20 +1752,20 @@ class SubDiagram:
 
         self._kwargs = _kwargs
 
-    # TODO: is this still needed? if yes, automate or use _singular_props
-    @classmethod
-    def separate_kwargs(cls, kwargs):
-        """Separate all relevant kwargs for the init if a SubDiagram."""
-        sdkwargs, other_kwargs = dict(), dict()
-        sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
-                   'hspace_combine', 'label_margin', 'cmap', 'norm',
-                   'mappable', 'blockprops', 'flowprops', 'width']
-        for k, v in kwargs.items():
-            if k in sd_args:
-                sdkwargs[k] = v
-            else:
-                other_kwargs[k] = v
-        return sdkwargs, other_kwargs
+    # # TODO: is this still needed? if yes, automate or use _singular_props
+    # @classmethod
+    # def separate_kwargs(cls, kwargs):
+    #     """Separate all relevant kwargs for the init if a SubDiagram."""
+    #     sdkwargs, other_kwargs = dict(), dict()
+    #     sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
+    #                'hspace_combine', 'label_margin', 'cmap', 'norm',
+    #                'mappable', 'blockprops', 'flowprops', 'width']
+    #     for k, v in kwargs.items():
+    #         if k in sd_args:
+    #             sdkwargs[k] = v
+    #         else:
+    #             other_kwargs[k] = v
+    #     return sdkwargs, other_kwargs
 
     def create_block_artists(self, ax, **kwargs):
         if self._blocks:
@@ -1797,6 +1795,24 @@ class SubDiagram:
             self._flows.create_artist(ax=ax, **_kwargs)
 
 
+def init_form_defaults(callabs, cls=None):
+    """Returns names of all parameter of callabs that have default values."""
+    if cls is None:  # Return the actual class decorator.
+        return functools.partial(init_form_defaults, callabs)
+
+    layout_params = set()
+    for callab in callabs:
+        params = inspect.signature(callab).parameters
+        layout_params.update((param for param in params
+                              if params[param].default != inspect._empty))
+    layout_params = layout_params.difference(
+        {param for param in inspect.signature(cls).parameters}
+    )
+    cls._form_defaults = layout_params
+    return cls
+
+
+@init_form_defaults((_Block, SubDiagram))
 class Alluvial:
     """
     Alluvial diagram.
@@ -1807,8 +1823,8 @@ class Alluvial:
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
     # @docstring.dedent_interpd
-    def __init__(self, x=None, ax=None, tags=None, blockprops=None,
-                 flowprops=None, label_kwargs={}, **kwargs):
+    def __init__(self, x=None, ax=None, blockprops=None, flowprops=None,
+                 **kwargs):
         """
         Create a new Alluvial instance.
 
@@ -1906,36 +1922,39 @@ class Alluvial:
         self.staled_layout = True
         # how many x ticks are maximally shown
         self.max_nbr_xticks = 10
-        self._defaults = dict()
-
+        # now handle the kwargs
+        # normalize whatever there is
         _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
-        fc = _kwargs.get('facecolor', None)
+        # setting up coloring (to be added to styling defaults in get_defaults)
+        fc = _kwargs.pop('facecolor', None)
         if fc is None:
             self._color_cycler = itertools.cycle(
                 mpl.rcParams['axes.prop_cycle'])
         else:
             # Note passing rgb/rgba arrays is not supported
             self._color_cycler = itertools.cycle(cycler(color=fc))
-        # TODO: if arguments for add are passed they cannot remain in kwargs
         if _kwargs:
-            # ###
-            # TODO: kw separation should be a method of SubDiagram entirely
+            # remove specific arguments for `.add` call
             flows = _kwargs.pop('flows', None)
             ext = _kwargs.pop('ext', None)
-            # ###
+            extout = _kwargs.pop('extout', None)
+            fractionflow = _kwargs.pop('fractionflow', None)
+            # separate layout parameter from styling parameter, get the layout:
+            self._defs_form = {k: _kwargs.pop(k) for k in self._form_defaults
+                               if _kwargs.get(k, None) is not None}
+            # what remains are styling defaults and will be passed down when
+            # calling `.finish`
+            self._defaults = _kwargs
             if flows is not None or ext is not None:
-                label = _kwargs.pop('label', None)
-                fractionflow = _kwargs.pop('fractionflow', False)
-                tags = _kwargs.pop('tags', None)
-                # draw a diagram if *flows* are provided
-                sdkw, self._defaults = SubDiagram.separate_kwargs(_kwargs)
-                self.add(flows=flows, ext=ext, extout=None, x=self._x,
-                         label=label, yoff=0,
-                         fractionflow=fractionflow, tags=tags,
-                         **sdkw)
+                self.add(flows=flows, ext=ext, extout=extout,
+                         fractionflow=fractionflow, x=self._x,
+                         **self._defs_form)
                 self.finish()
-            else:
-                self._defaults = _kwargs
+        else:
+            self._defaults = dict()
+            self._defs_form = dict()
+
+        print('defs at end of init', self._defaults, 'and', self._defs_form)
 
     def get_x(self):
         """Return the sequence of x coordinates of the Alluvial diagram"""
@@ -1997,7 +2016,7 @@ class Alluvial:
         return columns, flows
 
     def add_from_memberships(self, memberships, absentval=None, x=None,
-                             label=None, yoff=0, **kwargs):
+                             label=None, **kwargs):
         """
         Add an new subdiagram from a sequence of membership lists.
 
@@ -2018,12 +2037,12 @@ class Alluvial:
         """
         return self._from_membership(memberships=memberships,
                                      absentval=absentval, x=x, label=label,
-                                     yoff=yoff, **kwargs)
+                                     **kwargs)
 
     # TODO: rename this to the above
     # TODO: add support for changing axis=0/1 in case of pandas df
     def _from_membership(self, memberships, absentval=None, x=None, label=None,
-                         yoff=None, tags=None, **kwargs):
+                         tags=None, **kwargs):
         memberships = _to_valid_arrays(memberships, 'memberships', np.int)
         for i, membership in enumerate(memberships):
             if np.unique(membership).size != np.max(membership) + 1:
@@ -2056,12 +2075,14 @@ class Alluvial:
             nbr_blocks_last = nbr_blocks
         # do not yet handle the x axis
         # x, columns = self._determine_x(x, columns)
-        return self._add(columns, flows, x=x, label=label, yoff=yoff,
+        return self._add(columns, flows, x=x, label=label,
                          tags=tags, **kwargs)
 
+    # def from_memberships(cls, memberships, dcs=None, absentval=None, separate_dcs=False,
+    #         label=None, yoff=0.0, x=None, **kwargs):
     @classmethod
-    def from_memberships(cls, memberships, dcs=None, absentval=None, x=None,
-                         separate_dcs=False, label=None, yoff=0.0, **kwargs):
+    def from_memberships(cls, memberships, dcs=None, absentval=None,
+                         separate_dcs=False, **kwargs):
         """
         Add an new subdiagram from a sequence of membership lists.
 
@@ -2085,8 +2106,8 @@ class Alluvial:
         list must be derived from an enumeration of the groups.
 
         """
-        ax = kwargs.pop('ax', None)
-        alluvial = Alluvial(x=x, ax=ax)
+        # create an instance
+        alluvial = Alluvial(**kwargs)
 
         if dcs is not None:
             dcs = _to_valid_arrays(dcs, 'dcs', np.int)
@@ -2108,11 +2129,9 @@ class Alluvial:
                 for col in dcs:
                     tag_col = [dc_tags[i] for i in col]
                     tags.append(tag_col)
-                alluvial._from_membership(memberships, absentval, label=label,
-                                          yoff=yoff, tags=tags, **kwargs)
+                alluvial._from_membership(memberships, absentval, tags=tags)
         else:
-            alluvial._from_membership(memberships, absentval, label=label,
-                                      yoff=yoff, **kwargs)
+            alluvial._from_membership(memberships, absentval)
         alluvial.finish()
         return alluvial
 
@@ -2137,7 +2156,7 @@ class Alluvial:
         self._defaults['edgecolor'] = self._defaults['facecolor']
         return self._defaults
 
-    def _add(self, columns, flows, x, label, yoff, tags=None, **kwargs):
+    def _add(self, columns, flows, x, label, tags=None, **kwargs):
         """TODO: write docstring."""
         # Note: here the defaults from alluvial are passed to the new
         # subdiagram (is relevant for those for the proxies, like layout)
@@ -2146,8 +2165,8 @@ class Alluvial:
         # (actually specific to SubDiagram) form artist specific keywords and
         # pass the proxy specific here and the artist specific in
         # _create_collection
-        _kwargs = dict(self._defaults)
-        print('alluv defaults', _kwargs)
+        _kwargs = dict(self._defs_form)
+        # print('alluv defaults', _kwargs)
         _kwargs.update(normed_kws(kwargs, _ProxyCollection._artistcls))
         print('after adding from _add(kws)', _kwargs)
         _blockprops = dict(self._blockprops)
@@ -2157,16 +2176,16 @@ class Alluvial:
         _flowprops.update(normed_kws(_kwargs.pop('flowprops', {}),
                                      _ProxyCollection._artistcls))
         print('blockprops on _add', _blockprops)
-        diagram = SubDiagram(x=x, columns=columns, flows=flows, label=label,
+        diagram = SubDiagram(columns=columns, flows=flows, x=x, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
-                             yoff=yoff, tags=tags, **_kwargs)
+                             tags=tags, **_kwargs)
         self._add_diagram(diagram)
         self._dlabels.append(label or f'diagram-{self._diagc}')
         self._diagc += 1
         return diagram
 
-    def add(self, flows, ext=None, extout=None, x=None, label=None, yoff=0,
-            fractionflow=False, tags=None, **kwargs):
+    def add(self, flows, ext=None, extout=None, fractionflow=False, x=None,
+            label=None, yoff=0, tags=None, **kwargs):
         r"""
         Add an Alluvial diagram with a vertical offset.
         The offset must be provided in the same units as the block sizes.

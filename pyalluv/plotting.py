@@ -453,8 +453,8 @@ class _Block(_ArtistProxy):
         self._width = width
         self._xa = xa
         self._ya = ya
-        self._set_horizontalalignment(ha)
-        self._set_verticalalignment(va)
+        self.set_horizontalalignment(ha)
+        self.set_verticalalignment(va)
         # init the in and out flows:
         self._outflows = []
         self._inflows = []
@@ -548,47 +548,46 @@ class _Block(_ArtistProxy):
             self._artist.set_height(height)
         self.stale = True
 
-    def set_bounds(self, *args):
-        """
-        Set the bounds of the rectangle as *left*, *bottom*, *width*, *height*.
+    # def set_bounds(self, *args):
+    #     """
+    #     Set the bounds of the rectangle as *left*, *bottom*, *width*, *height*.
 
-        The values may be passed as separate parameters or as a tuple::
+    #     The values may be passed as separate parameters or as a tuple::
 
-            set_bounds(left, bottom, width, height)
-            set_bounds((left, bottom, width, height))
+    #         set_bounds(left, bottom, width, height)
+    #         set_bounds((left, bottom, width, height))
 
-        .. ACCEPTS: (left, bottom, width, height)
-        """
-        if len(args) == 1:
-            l, b, w, h = args[0]
-        else:
-            l, b, w, h = args
-        # ###
-        # TODO: call set_x, set_y, set_width, set_heght
-        self._x0 = l
-        self._y0 = b
-        self._width = w
-        self._height = h
-        # ###
-
-        self.stale = True
+    #     .. ACCEPTS: (left, bottom, width, height)
+    #     """
+    #     if len(args) == 1:
+    #         l, b, w, h = args[0]
+    #     else:
+    #         l, b, w, h = args
+    #     # ###
+    #     # TODO: call set_x, set_y, set_width, set_heght
+    #     self._x0 = l
+    #     self._y0 = b
+    #     self._width = w
+    #     self._height = h
+    #     # ###
+    #     self.stale = True
 
     # Note: get_bbox is not overwritten as we want to avoid requesting the
     # bounding box before the artist is attached to an axis.
 
     # custom getters and setters for this proxy
 
-    def get_xa(self):
-        """Return the x coordinate of the anchor point."""
-        return self._xa
+    # def get_xa(self):
+    #     """Return the x coordinate of the anchor point."""
+    #     return self._xa
 
-    def get_ya(self):
-        """Return the y coordinate of the anchor point."""
-        return self._ya
+    # def get_ya(self):
+    #     """Return the y coordinate of the anchor point."""
+    #     return self._ya
 
-    def get_xc(self, ):
-        """Return the y coordinate of the block's center."""
-        return self.get_x() + 0.5 * self.get_width()
+    # def get_xc(self, ):
+    #     """Return the y coordinate of the block's center."""
+    #     return self.get_x() + 0.5 * self.get_width()
 
     def get_yc(self, ):
         """Return the y coordinate of the block's center."""
@@ -598,27 +597,19 @@ class _Block(_ArtistProxy):
         """Set the x coordinate of the anchor point."""
         self._xa = x
 
-    def _set_horizontalalignment(self, align):
-        """TODO: write docstring."""
+    def set_horizontalalignment(self, align):
+        """Set the horizontal alignment of the anchor point and the block."""
         # TODO: uncomment once in mpl
         # _api.check_in_list(['center', 'left', 'right'], align=align)
         self._horizontalalignment = align
         self.stale = True
 
-    def _set_verticalalignment(self, align):
-        """TODO: write docstring."""
+    def set_verticalalignment(self, align):
+        """Set the vertical alignment of the anchor point and the block."""
         # TODO: uncomment once in mpl
         # _api.check_in_list(['center', 'top', 'bottom'], align=align)
         self._verticalalignment = align
         self.stale = True
-
-    def set_horizontalalignment(self, align):
-        """Set the horizontal alignment of the anchor point and the block."""
-        self._set_horizontalalignment(align)
-
-    def set_verticalalignment(self, align):
-        """Set the vertical alignment of the anchor point and the block."""
-        self._set_verticalalignment(align)
 
     def set_yc(self, yc):
         """
@@ -638,25 +629,15 @@ class _Block(_ArtistProxy):
         else:
             return self._inflows
 
-    def set_flows(self, out, flows):
+    def _set_flows(self, out, flows):
         if out:
             self._outflows = flows
         else:
             self._inflows = flows
 
-    # TODO: this is partial of get_flows
-    def get_outflows(self):
-        """Return a list of outgoing `._Flows`."""
-        return self._outflows
-
-    # TODO: this is partial of get_flows
-    def get_inflows(self):
-        """Return a list of incoming `._Flows`."""
-        return self._inflows
-
-    inflows = property(get_inflows, None,  # set_inflows,
+    inflows = property(functools.partial(get_flows, out=False), None,
                        doc="List of `._Flow` objects entering the block.")
-    outflows = property(get_outflows, None,  # set_outflows,
+    outflows = property(functools.partial(get_flows, out=True), None,
                         doc="List of `._Flow` objects leaving the block.")
 
     def get_xlim(self,):
@@ -673,13 +654,12 @@ class _Block(_ArtistProxy):
         y0, height = self.get_ylim()
         return x0, y0, width, height
 
-    def add_outflow(self, outflow):
-        """TODO: write docstring."""
-        self._outflows.append(outflow)
-
-    def add_inflow(self, inflow):
-        """TODO: write docstring."""
-        self._inflows.append(inflow)
+    def add_flow(self, flow, out=False):
+        """Add a flow either to the out- or the inflows."""
+        if out:
+            self._outflows.append(flow)
+        else:
+            self._inflows.append(flow)
 
     # ###
     # class specific methods for create_artist:
@@ -778,7 +758,7 @@ class _Block(_ArtistProxy):
             new_ordering.extend([tif[0]
                                  for tif in flow_infos
                                  if tif[self_loc_idx] == pref][::_order])
-        self.set_flows(out, [flows[i] for i in new_ordering])
+        self._set_flows(out, [flows[i] for i in new_ordering])
 
     def _set_flow_locations(self, out: bool):
         """
@@ -842,9 +822,9 @@ class _Flow(_ArtistProxy):
         self._xy0_in, self._xy0_out = None, None
         # attach the flow to the source and target blocks
         if self.source is not None:
-            self.source.add_outflow(self)
+            self.source.add_flow(self, out=True)
         if self.target is not None:
-            self.target.add_inflow(self)
+            self.target.add_flow(self, out=False)
         self._path = None
         self.stale = True
 

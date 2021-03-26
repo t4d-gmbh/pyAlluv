@@ -683,7 +683,7 @@ class _Block(_ArtistProxy):
                 self.get_edgecolor()[3] == 0.0):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
-        self.handle_flows()
+        self._handle_flows()
         x0, y0, width, height = self.get_bbox().bounds
     # ###
 
@@ -692,7 +692,7 @@ class _Block(_ArtistProxy):
         Get the anchor ant top for a flow a flow with a certain with and
         location preferences.
 
-        Note that the anchor is the lower corner while top is the upper corner.
+        Note that bottom is the lower corner while top is the upper corner.
         """
         h_loc = out_pref if out else in_pref  # preferred location here
         t_loc = in_pref if out else out_pref  # preferred location there
@@ -772,7 +772,7 @@ class _Block(_ArtistProxy):
             flow.set_locations(out, *self._request_loc(out, width, out_pref,
                                                        in_pref))
 
-    def handle_flows(self,):
+    def _handle_flows(self,):
         """TODO: write docstring."""
         for out_flow in self._outflows:
             out_flow.update_prefs()

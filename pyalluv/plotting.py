@@ -264,15 +264,15 @@ class _ArtistProxy:
         self._kwargs = {}
         self.update(**kwargs)
 
-    def set_tags(self, tags: list):
-        """Set a tag for the block."""
-        for tag in tags:
-            tag.register_proxy(self)
-        self._tags = tags
+    # def set_tags(self, tags: list):
+    #     """Set a tag for the block."""
+    #     for tag in tags:
+    #         tag.register_proxy(self)
+    #     self._tags = tags
 
-    def get_tags(self):
-        """Return the list of tags."""
-        return self._tags
+    # def get_tags(self):
+    #     """Return the list of tags."""
+    #     return self._tags
 
     def add_tag(self, tag):
         """Adding a new tag to the proxy."""
@@ -401,9 +401,6 @@ class _ArtistProxy:
 
 
 @_expose_artist_getters_and_setters
-@cbook._define_aliases({"verticalalignment": ["va"],
-                        "horizontalalignment": ["ha"], "width": ["w"],
-                        "height": ["h"]})
 class _Block(_ArtistProxy):
     """
     A Block in an Alluvial diagram.
@@ -505,11 +502,11 @@ class _Block(_ArtistProxy):
         else:
             return self._height
 
-    def set_x(self, x):
-        """Set the left coordinate of the rectangle."""
-        # TODO: take into account ha and set xa then
-        raise NotImplementedError('TODO')
-        self.stale = True
+    # def set_x(self, x):
+    #     """Set the left coordinate of the rectangle."""
+    #     # TODO: take into account ha and set xa then
+    #     raise NotImplementedError('TODO')
+    #     self.stale = True
 
     def set_y(self, y):
         """
@@ -523,18 +520,19 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += self._height
 
-    def set_xy(self, xy):
-        """
-        Set the left and bottom coordinates of the rectangle.
+    # def set_xy(self, xy):
+    #     """
+    #     Set the left and bottom coordinates of the rectangle.
 
-        Parameters
-        ----------
-        xy : (float, float)
-        """
-        # TODO: use set_x and set_y here
-        raise NotImplementedError('TODO')
-        self.stale = True
+    #     Parameters
+    #     ----------
+    #     xy : (float, float)
+    #     """
+    #     # TODO: use set_x and set_y here
+    #     raise NotImplementedError('TODO')
+    #     self.stale = True
 
+    # unused but might be useful
     def set_width(self, width):
         """Set the width of the block."""
         self._width = width
@@ -542,9 +540,9 @@ class _Block(_ArtistProxy):
             self._artist.set_width(width)
         self.stale = True
 
+    # unused but might be useful
     def set_height(self, height):
         """Set the height of the block."""
-        # TODO: check if artist exists set its height if yes
         self._height = height
         if self._artist is not None:
             self._artist.set_height(height)
@@ -1214,8 +1212,16 @@ class SubDiagram:
         Parameters
         ----------
         x : sequence of scalars
+            The x coordinates of the columns.
             A sequence of M scalars that determine the x coordinates of columns
             provided in *columns*.
+
+            When provided, the diagram ignores the x coordinates that might
+            be provided by the `.Alluvial` instance it is attached to.
+
+            If *x* is None and also the `.Alluvial` instance has no values set
+            for the x coordinates they will  default to the range defined by
+            the number of columns.
         columns : sequence of array_like objects
             Sequence of M array-like objects each containing the blocks of a
             column.
@@ -1259,6 +1265,26 @@ class SubDiagram:
             - 'optimized': Starting from a centered layout the order of bocks
               in a column is iteratively changed to decrease the vertical
               displacement of all flows attached to the column.
+        tags : sequence or str, optional
+            Tagging of the blocks. Tags can be provided in the following
+            formats:
+
+            - String, allowed are {'column', 'index'}.
+              If *tags* is set to 'column', all blocks in a column get the same
+              tag. If 'index' is used, in each column the blocks is tagged by
+              their index in the column.
+
+                .. warnging::
+                not yet implemented
+
+            - Sequence of M tags, providing for each column a separate tag.
+            - Sequence of list of tags, providing fore each block in each
+              column a tag.
+
+            If a sequence is provided, the tags can be any hashable object.
+
+            Note that *tags* should be used in combination with *tagprops* in
+            order to specify the styling for each tag.
 
         Other Parameters (TODO)
         ----------------
@@ -1310,10 +1336,11 @@ class SubDiagram:
         if tags is not None:
             for c_i, col in enumerate(self._columns):
                 column = list(col)
-                if tags is not None:
-                    col_tags = tags[c_i]
-                    for i, block in enumerate(column):
-                        block.add_tag(col_tags[i])
+                col_tags = tags[c_i]
+                if not np.iterable(col_tags):  # tagging by column
+                    col_tags = len(column) * [col_tags]
+                for i, block in enumerate(column):
+                    block.add_tag(col_tags[i])
 
         # TODO: below attributes need to be handled
         self._redistribute_vertically = 4
@@ -1748,7 +1775,6 @@ class SubDiagram:
         self._blockprops['width'] = self._blockprops.get('width',
                                                          kwargs.pop('width',
                                                                     None))
-        print('distibute, block:', self._blockprops, 'kws:', _kwargs)
 
         self._kwargs = _kwargs
 
@@ -1916,7 +1942,6 @@ class Alluvial:
         self._tags = defaultdict(_Tag)
         self._extouts = []
         self._diagc = 0
-        self._dlabels = []
         self._xlim = None
         self._ylim = None
         self.staled_layout = True
@@ -1953,8 +1978,6 @@ class Alluvial:
         else:
             self._defaults = dict()
             self._defs_form = dict()
-
-        print('defs at end of init', self._defaults, 'and', self._defs_form)
 
     def get_x(self):
         """Return the sequence of x coordinates of the Alluvial diagram"""
@@ -2015,126 +2038,6 @@ class Alluvial:
             pass  # TODO: check extout format
         return columns, flows
 
-    def add_from_memberships(self, memberships, absentval=None, x=None,
-                             label=None, **kwargs):
-        """
-        Add an new subdiagram from a sequence of membership lists.
-
-        Parameters
-        ----------
-        memberships : sequence of array-like objects or dataframe
-            The length of the sequence determines the number of columns in the
-            diagram. Each element in the sequence must be an array-like object
-            representing a membership list. For further details see below.
-        absentval : int or np.nan (default=None)
-            Notes for which  this value is encountered in the membership lists
-            are considered to not be present.
-
-        Note that all elements in *memberships* must be membership lists of
-        identical length. Further the group identifiers present in a membership
-        list must be derived from an enumeration of the groups.
-
-        """
-        return self._from_membership(memberships=memberships,
-                                     absentval=absentval, x=x, label=label,
-                                     **kwargs)
-
-    # TODO: rename this to the above
-    # TODO: add support for changing axis=0/1 in case of pandas df
-    def _from_membership(self, memberships, absentval=None, x=None, label=None,
-                         tags=None, **kwargs):
-        memberships = _to_valid_arrays(memberships, 'memberships', np.int)
-        for i, membership in enumerate(memberships):
-            if np.unique(membership).size != np.max(membership) + 1:
-                raise ValueError("The provided membership lists must associate"
-                                 " nodes to groups that are continuously"
-                                 " numbered starting from 0. This is not the"
-                                 f" case at index {i}:\n{membership}")
-        # TODO: make it work with dataframe
-        # if not isinstance(memberships, (list, tuple)):
-        #     try:
-        #         memberships.index.values
-        #     except AttributeError:
-        #         memberships.shape
-        #         # return np.arange(y.shape[0], dtype=float), y
-        #         pass
-        columns, flows = [], []
-        # process the first membership list
-        membership_current = memberships[0]
-        nbr_blocks_last, col = _memship_to_column(membership_current, absentval)
-        columns, flows = [col], []
-        for i in range(1, len(memberships)):
-            # create the flow matrix
-            nbr_blocks, col = _memship_to_column(memberships[i])
-            dims = (nbr_blocks, nbr_blocks_last)
-            flow, ext = _between_memships_flow(dims, membership_current, memberships[i])
-            flows.append(flow)
-            # add ext to the column and append to the columns
-            columns.append(col + ext)
-            membership_current = memberships[i]
-            nbr_blocks_last = nbr_blocks
-        # do not yet handle the x axis
-        # x, columns = self._determine_x(x, columns)
-        return self._add(columns, flows, x=x, label=label,
-                         tags=tags, **kwargs)
-
-    # def from_memberships(cls, memberships, dcs=None, absentval=None, separate_dcs=False,
-    #         label=None, yoff=0.0, x=None, **kwargs):
-    @classmethod
-    def from_memberships(cls, memberships, dcs=None, absentval=None,
-                         separate_dcs=False, **kwargs):
-        """
-        Add an new subdiagram from a sequence of membership lists.
-
-        Parameters
-        ----------
-        memberships : sequence of array-like objects or dataframe.
-            The length of the sequence determines the number of columns in the
-            diagram. Each element in the sequence must be an array-like object
-            representing a membership list. For further details see below.
-        dcs : sequence of array-like objects or dataframe (optional)
-            Sequence to further classify the classes used in the membership
-            lists. If provided *dcs* must be of the same length as
-            *memberships* and in each array of *memberships* the values
-            map to the index in the corresponding array of *dcs*.
-        absentval : int or np.nan (default=None)
-            Notes for which  this value is encountered in the membership lists
-            are considered to not be present.
-
-        Note that all elements in *memberships* must be membership lists of
-        identical length. Further the group identifiers present in a membership
-        list must be derived from an enumeration of the groups.
-
-        """
-        # create an instance
-        alluvial = Alluvial(**kwargs)
-
-        if dcs is not None:
-            dcs = _to_valid_arrays(dcs, 'dcs', np.int)
-            if separate_dcs:
-                # create individual sub-diagrams for each dc
-                raise NotImplementedError('Creating for each dcs a separate'
-                                          ' subdiagram is not yet implemented')
-            else:
-                # nbr_dcs = max(map(lambda x: x.max()))
-                nbr_dcs = int(max(np.amax(dc, initial=-1) for dc in dcs) + 1)
-                dc_tags = []
-                for i in range(nbr_dcs):
-                    _kwargs = dict(kwargs)
-                    _kwargs.update(alluvial.get_defaults())
-                    dc_tags.append(alluvial.register_tag(label=f'dc{i}',
-                                                         **_kwargs))
-                # create a sequence of tag arrays that will match with columns
-                tags = []
-                for col in dcs:
-                    tag_col = [dc_tags[i] for i in col]
-                    tags.append(tag_col)
-                alluvial._from_membership(memberships, absentval, tags=tags)
-        else:
-            alluvial._from_membership(memberships, absentval)
-        alluvial.finish()
-        return alluvial
-
     def _inject_default_blockprops(self,):
         """Completing styling properties of blocks with sensible defaults."""
         # TODO: Note that this overwrites properties passed in kwargs of
@@ -2156,36 +2059,75 @@ class Alluvial:
         self._defaults['edgecolor'] = self._defaults['facecolor']
         return self._defaults
 
-    def _add(self, columns, flows, x, label, tags=None, **kwargs):
-        """TODO: write docstring."""
-        # Note: here the defaults from alluvial are passed to the new
-        # subdiagram (is relevant for those for the proxies, like layout)
-        # defaults are actually passed once again when calling
-        # _create_collection. It would be better to separated proxy specific
-        # (actually specific to SubDiagram) form artist specific keywords and
-        # pass the proxy specific here and the artist specific in
-        # _create_collection
-        _kwargs = dict(self._defs_form)
-        # print('alluv defaults', _kwargs)
-        _kwargs.update(normed_kws(kwargs, _ProxyCollection._artistcls))
-        print('after adding from _add(kws)', _kwargs)
-        _blockprops = dict(self._blockprops)
-        _blockprops.update(normed_kws(_kwargs.pop('blockprops', {}),
-                                      _ProxyCollection._artistcls))
-        _flowprops = dict(self._flowprops)
-        _flowprops.update(normed_kws(_kwargs.pop('flowprops', {}),
-                                     _ProxyCollection._artistcls))
-        print('blockprops on _add', _blockprops)
-        diagram = SubDiagram(columns=columns, flows=flows, x=x, label=label,
-                             blockprops=_blockprops, flowprops=_flowprops,
-                             tags=tags, **_kwargs)
-        self._add_diagram(diagram)
-        self._dlabels.append(label or f'diagram-{self._diagc}')
-        self._diagc += 1
-        return diagram
+    @classmethod
+    def from_memberships(cls, memberships, dcs=None, absentval=None,
+                         separate_dcs=False, dcsprops=None, **kwargs):
+        """
+        Add an new subdiagram from a sequence of membership lists.
 
-    def add(self, flows, ext=None, extout=None, fractionflow=False, x=None,
-            label=None, yoff=0, tags=None, **kwargs):
+        Parameters
+        ----------
+        memberships : sequence of array-like objects or dataframe.
+            The length of the sequence determines the number of columns in the
+            diagram. Each element in the sequence must be an array-like object
+            representing a membership list. For further details see below.
+        dcs : sequence of array-like objects or dataframe (optional)
+            Sequence to further classify the classes used in the membership
+            lists. If provided *dcs* must be of the same length as
+            *memberships* and in each array of *memberships* the values
+            map to the index in the corresponding array of *dcs*.
+        absentval : int or np.nan (default=None)
+            Notes for which  this value is encountered in the membership lists
+            are considered to not be present.
+        separate_dcs : bool (default=False)
+            By default (`False`) all blocks in a dynamic community get a tag
+            that styles this community.
+            If set to `True` each dynamic community will be drawn as a separate
+            sub-diagram and no Tags are used.
+        dcsprops : dict or sequence of dict, optional
+            Defines the styling for each dynamic community.
+
+        Note that all elements in *memberships* must be membership lists of
+        identical length. Further the group identifiers present in a membership
+        list must be derived from an enumeration of the groups.
+
+        """
+        # create an alluvial instance
+        x = kwargs.pop('x', None)
+        ax = kwargs.pop('ax', None)
+        blockprops = kwargs.pop('blockprops', None)
+        flowprops = kwargs.pop('flowprops', None)
+        alluvial = Alluvial(x=x, ax=ax, blockprops=blockprops,
+                            flowprops=flowprops, **kwargs)
+        if dcs is not None:
+            dcs = _to_valid_arrays(dcs, 'dcs', np.int)
+            if separate_dcs:
+                # create individual sub-diagrams for each dc
+                raise NotImplementedError('Creating for each dcs a separate'
+                                          ' subdiagram is not yet implemented')
+            else:
+                # nbr_dcs = max(map(lambda x: x.max()))
+                nbr_dcs = int(max(np.amax(dc, initial=-1) for dc in dcs) + 1)
+                dc_tags = []
+                if not np.iterable(dcsprops):
+                    dcsprops = nbr_dcs * [dcsprops or dict()]
+                for i in range(nbr_dcs):
+                    _kwargs = dict(alluvial.get_defaults())
+                    _kwargs.update(dcsprops[i])
+                    dc_tags.append(alluvial.register_tag(label=f'dc{i}',
+                                                         **_kwargs))
+                # create a sequence of tag arrays that will match with columns
+                tags = []
+                for col in dcs:
+                    tag_col = [dc_tags[i] for i in col]
+                    tags.append(tag_col)
+                alluvial.add_from_memberships(memberships, absentval, tags=tags)
+        else:
+            alluvial.add_from_memberships(memberships, absentval)
+        alluvial.finish()
+        return alluvial
+
+    def add(self, flows, ext=None, extout=None, fractionflow=False, **kwargs):
         r"""
         Add an Alluvial diagram with a vertical offset.
         The offset must be provided in the same units as the block sizes.
@@ -2224,21 +2166,6 @@ class Alluvial:
             diagram.
 
             If a list is provided the entries are mapped to diagrams by index.
-        x : array-like, optional
-            The x coordinates of the columns.
-
-            When provided, the added diagram ignores the x coordinates that
-            might have been provided on initiation of the `.Alluvial` instance
-            or any previous :meth:`.Alluvial.add` call.
-
-            If the `.Alluvial` instance had no values set for the x coordinates
-            *x* will be set to the new default.
-
-            If not provided and no x coordinates have been set previously, then
-            the x coordinates will default to the range defined by the number
-            of columns in the diagram to add.
-        label : string, optional
-            The label of the diagram to add.
         fractionflow : bool, default: False
             When set to *False* (the default) the values in *flows* are
             considered to be absolute values.
@@ -2250,28 +2177,6 @@ class Alluvial:
 
             If fractions are provided,  you must set *ext* to provide at least
             the block sizes for the initial column of the Alluvial diagram.
-        yoff : int or float, default: 0
-            A constant vertical offset applied to the added diagram.
-        tags : sequence or str, optional
-            Tagging of the blocks. Tags can be provided in the following
-            formats:
-
-            - String, allowed are {'column', 'index'}.
-              If *tags* is set to 'column', all blocks in a column get the same
-              tag. If 'index' is used, in each column the blocks is tagged by
-              their index in the column.
-            - Sequence of M tags, providing for each column a separate tag.
-            - Sequence of list of tags, providing fore each block in each
-              column a tag.
-
-            If a sequence is provided, the tags can be any hashable object.
-
-            Note that *tags* should be used in combination with *tagprops* in
-            order to specify the styling for each tag.
-        tagprops : dict, optional
-            Provide for each tag a dictionary that specifies the styling of
-            blocks with this tag. See :meth:`
-
         Other Parameters
         ----------------
         **kwargs : `.SubDiagram` properties
@@ -2352,8 +2257,87 @@ class Alluvial:
         # x, columns = self._determine_x(x, columns)
         # TODO: extout are not processed so far
         self._extouts.append(extout)
-        return self._add(columns=columns, flows=flows, x=x, label=label,
-                         yoff=yoff, tags=tags, **kwargs)
+        return self._add(columns=columns, flows=flows, **kwargs)
+
+    # TODO: add support for changing axis=0/1 in case of pandas df
+    def add_from_memberships(self, memberships, absentval=None, **kwargs):
+        """
+        Add an new subdiagram from a sequence of membership lists.
+
+        Parameters
+        ----------
+        memberships : sequence of array-like objects or dataframe
+            The length of the sequence determines the number of columns in the
+            diagram. Each element in the sequence must be an array-like object
+            representing a membership list. For further details see below.
+        absentval : int or np.nan (default=None)
+            Notes for which  this value is encountered in the membership lists
+            are considered to not be present.
+
+        Note that all elements in *memberships* must be membership lists of
+        identical length. Further the group identifiers present in a membership
+        list must be derived from an enumeration of the groups.
+
+        """
+        memberships = _to_valid_arrays(memberships, 'memberships', np.int)
+        for i, membership in enumerate(memberships):
+            if np.unique(membership).size != np.max(membership) + 1:
+                raise ValueError("The provided membership lists must associate"
+                                 " nodes to groups that are continuously"
+                                 " numbered starting from 0. This is not the"
+                                 f" case at index {i}:\n{membership}")
+        # TODO: make it work with dataframe
+        # if not isinstance(memberships, (list, tuple)):
+        #     try:
+        #         memberships.index.values
+        #     except AttributeError:
+        #         memberships.shape
+        #         # return np.arange(y.shape[0], dtype=float), y
+        #         pass
+        columns, flows = [], []
+        # process the first membership list
+        membership_current = memberships[0]
+        nbr_blocks_last, col = _memship_to_column(membership_current, absentval)
+        columns, flows = [col], []
+        for i in range(1, len(memberships)):
+            # create the flow matrix
+            nbr_blocks, col = _memship_to_column(memberships[i])
+            dims = (nbr_blocks, nbr_blocks_last)
+            flow, ext = _between_memships_flow(dims, membership_current, memberships[i])
+            flows.append(flow)
+            # add ext to the column and append to the columns
+            columns.append(col + ext)
+            membership_current = memberships[i]
+            nbr_blocks_last = nbr_blocks
+        # do not yet handle the x axis
+        # x, columns = self._determine_x(x, columns)
+        return self._add(columns, flows, **kwargs)
+
+    def _add(self, columns, flows, **kwargs):
+        """TODO: write docstring."""
+        # Note: here the defaults from alluvial are passed to the new
+        # subdiagram (is relevant for those for the proxies, like layout)
+        # defaults are actually passed once again when calling
+        # _create_collection. It would be better to separated proxy specific
+        # (actually specific to SubDiagram) form artist specific keywords and
+        # pass the proxy specific here and the artist specific in
+        # _create_collection
+        _kwargs = dict(self._defs_form)
+        _kwargs.update(normed_kws(kwargs, _ProxyCollection._artistcls))
+        _blockprops = dict(self._blockprops)
+        _blockprops.update(normed_kws(_kwargs.pop('blockprops', {}),
+                                      _ProxyCollection._artistcls))
+        _flowprops = dict(self._flowprops)
+        _flowprops.update(normed_kws(_kwargs.pop('flowprops', {}),
+                                     _ProxyCollection._artistcls))
+        # set a default label for a subdiagram
+        label = _kwargs.pop('label', f'diagram-{self._diagc}')
+        diagram = SubDiagram(columns=columns, flows=flows, label=label,
+                             blockprops=_blockprops, flowprops=_flowprops,
+                             **_kwargs)
+        self._add_diagram(diagram)
+        self._diagc += 1
+        return diagram
 
     def _determine_x(self, x, columns):
         """TODO: write docstring."""
@@ -2400,7 +2384,6 @@ class Alluvial:
             # make it a property of Alluvial...
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
                                          **defaults)
-            print('set alluv minmax', self._xlim)
         diag_zorder -= diag_zorder
         # ###
         # TODO: first draw the inter sub-diagram flows (corss-flows)
@@ -2433,7 +2416,6 @@ class Alluvial:
     def x_collected(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
         combined_x = self.convert_x(self._x).tolist()
-        print('diagrams:', self._diagrams)
         for diagram in self._diagrams:
             combined_x.extend(self.convert_x(diagram.get_x()).tolist())
             _ymin, _ymax = diagram.get_ylim()

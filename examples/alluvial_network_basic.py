@@ -19,8 +19,6 @@ memberships = [[0, 1, 1, 2],  # t1
 # Create an alluvial diagram based on the memberships
 alluv = Alluvial.from_memberships(memberships, layout='top',
                                   x=['t1', 't2', 't3'], width=0.2)
-# Tell alluvial to determine the layout and draw the diagrams
-alluv.finish()
 
 plt.show()
 

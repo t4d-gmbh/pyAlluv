@@ -63,9 +63,9 @@ def _to_valid_arrays(data, attribute, dtype=None):
     return data
 
 
-def _memship_to_column(membership, absentval=None):
+def memship_to_column(membership, absentval=None):
     """
-    Convert a membership list into a column for an Alluvial diagram.
+    Convert a membership list into a column in an Alluvial diagram.
 
     Parameters
     ----------
@@ -93,8 +93,6 @@ def _memship_to_column(membership, absentval=None):
     col = np.zeros(nbr_blocks)
     for bid, count in zip(block_ids.astype(int), counts):
         col[bid] = count
-    # TODO: this is not for production: make sure group ids start from 0
-    assert np.all(col != 0)
     return nbr_blocks, col
 
 
@@ -147,11 +145,11 @@ def _between_memships_flow(flow_dims, membership, membership_next,
     return flowmatrix, ext
 
 
-def _separate_selector(*selector):
-    """Returns slices based on the passed selectors."""
+def _separate_selector(*selector, max_selectors=3):
+    """Returns slices based on the selectors."""
     nbr_args = len(selector)
-    # convert all input to slices
 
+    # convert all input to slices
     def _to_slice(arg):
         if isinstance(arg, int):
             return slice(arg, arg + 1 if arg != -1 else None)
@@ -162,7 +160,7 @@ def _separate_selector(*selector):
         else:
             return slice(*arg)
     selector = [_to_slice(arg) for arg in selector]
-    return (3 - nbr_args) * [slice(None, None)] + selector
+    return (max_selectors - nbr_args) * [slice(None, None)] + selector
 
 
 def _expose_artist_getters_and_setters(cls):
@@ -250,6 +248,7 @@ def init_defaults(callabs, cls=None):
         params = inspect.signature(callab).parameters
         layout_params.update((param for param in params
                               if params[param].default != inspect._empty))
+    # remove all parameters present in cls.__init__
     layout_params = layout_params.difference(
         {param for param in inspect.signature(cls).parameters}
     )
@@ -268,14 +267,21 @@ class _ArtistProxy:
     _artistcls = Artist  # derived must overwrite
 
     def __init__(self, label=None, tags=None, **kwargs):
-        """TODO: write docstring."""
+        """
+        Parameters
+        ----------
+        label : str, optonal
+           The label of this _ArtistProxy.
+        tags : sequence, optional
+           A set of `._Tag` instances.
+        """
         # TODO: not sure if stale is needed for this
         self.stale = True   # This only tracks form/layout but no style changes
         self._tags = []     # list of tag identifiers (label of a tag)
         if tags is not None:
             for tag in tags:
                 self.add_tag(tag)
-        self._tag_props = dict()  # stores properties from tags
+        self._tag_props = dict()  # stores properties from tags to apply
         self._artist = None
         self._is_styled = False  # Indicates if styling properties were set
         self._kwargs = {}
@@ -345,7 +351,7 @@ class _ArtistProxy:
         Note that aliases are not allowed for *prop*. This is because tags are
         included when trying to get the styling property and a single tag might
         be associated to proxies of various artist subclasses that might not
-        all have the same set aliases.
+        all have the same aliases.
         """
         if getattr(self, f"own_{prop}", False):
             return getattr(self, f"get_{prop}")()
@@ -407,7 +413,7 @@ class _ArtistProxy:
         self._post_creation(ax=ax)             # wrap-up callback
 
     def get_artist(self,):
-        """TODO: write docstring."""
+        """Returns the artist associated to this proxy."""
         if self._artist is None:
             raise ValueError("The artist has not been created.")
         return self._artist
@@ -419,9 +425,7 @@ class _Block(_ArtistProxy):
     A Block in an Alluvial diagram.
 
         Blocks in an Alluvial diagram get their vertical position assigned by a
-        layout algorithm and thus after creation. This is the rational to why
-        *_Block* inherits directly from `matplotlib.patches.Patch`, rather than
-        `matplotlib.patches.PathPatch` or `matplotlib.patches.Rectangle`.
+        layout algorithm and thus after creation.
     """
     _artistcls = Rectangle
 
@@ -435,12 +439,12 @@ class _Block(_ArtistProxy):
         -----------
         height : float
           Height of the block.
+        width : float,  optional
+          Block width.
         xa: scalar, optional
           The x coordinate of the block's anchor point.
         ya: scalar, optional
           The y coordinate of the block's anchor point.
-        width : float,  optional
-          Block width.
         label : str, optional
           Block label that can be displayed in the diagram.
         ha : {'center', 'left', 'right'}, default: 'center'
@@ -473,9 +477,11 @@ class _Block(_ArtistProxy):
         self._inflows = []
         self._label = label
         self.label_margin = label_margin
-        self._to_margin_index = lambda x: 0 if x <= 0 else 1
+        # setting up the margin handling
+        # _margins are encoded [[out-bottom, out-top], [in-bottom, in-top]]
+        self._to_margin_index = lambda x: 0 if x <= 0 else 1  # out=0, in=1
         _yz = self._height - self._height  # create the neutral element
-        self._margins = [[_yz, _yz], [_yz, _yz]]  # out(b[ottom],t[op]),in(b,t)
+        self._margins = [[_yz, _yz], [_yz, _yz]]
 
     # getters and setters from attached artist
     def get_x(self):
@@ -502,7 +508,6 @@ class _Block(_ArtistProxy):
 
     def get_width(self):
         """Return the width of the block."""
-        # TODO: this should be functionalized for other attributes
         if self._artist is not None:
             return self._artist.get_width()
         else:
@@ -545,7 +550,6 @@ class _Block(_ArtistProxy):
     #     raise NotImplementedError('TODO')
     #     self.stale = True
 
-    # unused but might be useful
     def set_width(self, width):
         """Set the width of the block."""
         self._width = width
@@ -553,7 +557,6 @@ class _Block(_ArtistProxy):
             self._artist.set_width(width)
         self.stale = True
 
-    # unused but might be useful
     def set_height(self, height):
         """Set the height of the block."""
         self._height = height
@@ -566,17 +569,17 @@ class _Block(_ArtistProxy):
 
     # custom getters and setters for this proxy
 
-    # def get_xa(self):
-    #     """Return the x coordinate of the anchor point."""
-    #     return self._xa
+    def get_xa(self):
+        """Return the x coordinate of the anchor point."""
+        return self._xa
 
-    # def get_ya(self):
-    #     """Return the y coordinate of the anchor point."""
-    #     return self._ya
+    def get_ya(self):
+        """Return the y coordinate of the anchor point."""
+        return self._ya
 
-    # def get_xc(self, ):
-    #     """Return the y coordinate of the block's center."""
-    #     return self.get_x() + 0.5 * self.get_width()
+    def get_xc(self, ):
+        """Return the y coordinate of the block's center."""
+        return self.get_x() + 0.5 * self.get_width()
 
     def get_yc(self, ):
         """Return the y coordinate of the block's center."""
@@ -601,11 +604,7 @@ class _Block(_ArtistProxy):
         self.stale = True
 
     def set_yc(self, yc):
-        """
-        Set the y coordinate of the block center.
-
-        Note that this method alters the y coordinate of the anchor point.
-        """
+        """Set the y coordinate of the block center."""
         self._ya = yc
         if self._verticalalignment == 'bottom':
             self._ya -= 0.5 * self._height
@@ -2223,11 +2222,11 @@ class Alluvial(_Initiator):
         columns, flows = [], []
         # process the first membership list
         membership_current = memberships[0]
-        nbr_blocks_last, col = _memship_to_column(membership_current, absentval)
+        nbr_blocks_last, col = memship_to_column(membership_current, absentval)
         columns, flows = [col], []
         for i in range(1, len(memberships)):
             # create the flow matrix
-            nbr_blocks, col = _memship_to_column(memberships[i])
+            nbr_blocks, col = memship_to_column(memberships[i])
             dims = (nbr_blocks, nbr_blocks_last)
             flow, ext = _between_memships_flow(dims, membership_current, memberships[i])
             flows.append(flow)

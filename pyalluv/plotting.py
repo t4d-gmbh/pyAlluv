@@ -240,6 +240,23 @@ def _expose_artist_getters_and_setters(cls):
     return cls
 
 
+def init_defaults(callabs, cls=None):
+    """Returns names of all parameter of callabs that have default values."""
+    if cls is None:  # Return the actual class decorator.
+        return functools.partial(init_defaults, callabs)
+
+    layout_params = set()
+    for callab in callabs:
+        params = inspect.signature(callab).parameters
+        layout_params.update((param for param in params
+                              if params[param].default != inspect._empty))
+    layout_params = layout_params.difference(
+        {param for param in inspect.signature(cls).parameters}
+    )
+    cls._init_defaults = layout_params
+    return cls
+
+
 class _ArtistProxy:
     """
     Proxy class for `Artist` subclasses used to draw the various element in an
@@ -388,10 +405,6 @@ class _ArtistProxy:
         self._init_artist(ax)                  # initiate artist with defaults
         self._update_artist(**props)           # apply collected properties
         self._post_creation(ax=ax)             # wrap-up callback
-
-    # def add_artist(self, ax):
-    #     """Adding the artist to an axes."""
-    #     raise NotImplementedError('Derived must override')
 
     def get_artist(self,):
         """TODO: write docstring."""
@@ -547,30 +560,6 @@ class _Block(_ArtistProxy):
         if self._artist is not None:
             self._artist.set_height(height)
         self.stale = True
-
-    # def set_bounds(self, *args):
-    #     """
-    #     Set the bounds of the rectangle as *left*, *bottom*, *width*, *height*.
-
-    #     The values may be passed as separate parameters or as a tuple::
-
-    #         set_bounds(left, bottom, width, height)
-    #         set_bounds((left, bottom, width, height))
-
-    #     .. ACCEPTS: (left, bottom, width, height)
-    #     """
-    #     if len(args) == 1:
-    #         l, b, w, h = args[0]
-    #     else:
-    #         l, b, w, h = args
-    #     # ###
-    #     # TODO: call set_x, set_y, set_width, set_heght
-    #     self._x0 = l
-    #     self._y0 = b
-    #     self._width = w
-    #     self._height = h
-    #     # ###
-    #     self.stale = True
 
     # Note: get_bbox is not overwritten as we want to avoid requesting the
     # bounding box before the artist is attached to an axis.
@@ -788,7 +777,7 @@ class _Flow(_ArtistProxy):
     """
     _artistcls = patches.PathPatch
 
-    def __init__(self, flow, source=None, target=None, label=None, tags=None,
+    def __init__(self, flow, source, target, label=None, tags=None,
                  **kwargs):
         """
 
@@ -982,8 +971,6 @@ class _ProxyCollection(_ArtistProxy):
         label : str, optional
             Label of the collection.
         """
-        self._cmap_data = kwargs.pop('mappable', None)
-
         super().__init__(label=label, tags=tags, **kwargs)
 
         self._proxies = proxies
@@ -997,6 +984,19 @@ class _ProxyCollection(_ArtistProxy):
 
     def __bool__(self,):
         return bool(self._proxies)
+
+    def _applicable(self, props):
+        """
+        Separate *props* into applicable and non-applicable properties.
+        Applicable are properties for which the proxy has a 'set_' method.
+        """
+        applicable, nonapp = super()._applicable(props)
+        # since we use custom name for the mappable array we need to make it
+        # applicable
+        for to_applicable in ['mappable']:
+            if to_applicable in nonapp:
+                applicable[to_applicable] = nonapp.pop(to_applicable)
+        return applicable, nonapp
 
     def to_element_styling(self, styleprops: dict):
         """Convert the styling properties to lists matching self._proxies."""
@@ -1031,6 +1031,11 @@ class _ProxyCollection(_ArtistProxy):
             [proxy.get_artist() for proxy in self._proxies],
             match_original=self._match_original,
         )
+
+    def _update_artist(self, **kwargs):
+        _kwargs = dict(kwargs)
+        _kwargs.update(self._kwargs)
+        self._cmap_data = _kwargs.pop('mappable', None)
         if self._cmap_data is not None:
             _mappable_array = np.asarray([getattr(proxy,
                                                   f'get_{self._cmap_data}')()
@@ -1041,9 +1046,6 @@ class _ProxyCollection(_ArtistProxy):
                 _mappable_array = date2num(_mappable_array)
             self._artist.set_array(_mappable_array)
 
-    def _update_artist(self, **kwargs):
-        _kwargs = dict(kwargs)
-        _kwargs.update(self._kwargs)
         if self._match_original:
             # make sure to not overwrite individual properties
             for props in ('facecolor', 'edgecolor', 'linewidth', 'linestyle',
@@ -1052,10 +1054,6 @@ class _ProxyCollection(_ArtistProxy):
         self._artist.update(_kwargs)
 
     def _post_creation(self, ax=None):
-        # ###
-        # TODO: broadcast styling to proxies
-        # NOT SURE WHY THIS WAS NEEDED
-        # ###
         self._artist = ax.add_collection(self._artist)
 
     def add_proxy(self, proxy):
@@ -1179,15 +1177,25 @@ class _Tag(cm.ScalarMappable):
         return props
 
 
-class SubDiagram:
+class _Initiator():
+    _init_defaults = None
+
+    @ classmethod
+    def split_inits(cls, props):
+        return {k: props.pop(k) for k in cls._init_defaults
+                if props.get(k, None) is not None}
+
+
+@init_defaults((_Block,))
+class SubDiagram(_Initiator):
     """
     A collection of Blocks and Flows belonging to a diagram.
 
     """
     def __init__(self, columns, flows, x=None, label=None, yoff=0, hspace=1,
                  hspace_combine='divide', label_margin=(0, 0),
-                 layout='centered', blockprops=None, flowprops=None, tags=None,
-                 **kwargs):
+                 layout='centered', blockprops=None, flowprops=None,
+                 tags=None):
         """
         Parameters
         ----------
@@ -1245,6 +1253,12 @@ class SubDiagram:
             - 'optimized': Starting from a centered layout the order of bocks
               in a column is iteratively changed to decrease the vertical
               displacement of all flows attached to the column.
+        blockprops : dict, optional
+            Styling parameter that are applied to all blocks in this diagram.
+            For a list of possible parameter see the list for Collection below.
+        flowprops : dict, optional
+            Styling parameter that are applied to all flows in this diagram.
+            For a list of possible parameter see the list for Collection below.
         tags : sequence or str, optional
             Tagging of the blocks. Tags can be provided in the following
             formats:
@@ -1266,29 +1280,20 @@ class SubDiagram:
             Note that *tags* should be used in combination with *tagprops* in
             order to specify the styling for each tag.
 
-        Other Parameters (TODO)
-        ----------------
-        **kwargs : Allowed are `.Collection` properties for Blocks and Flows
-            Define the styling to apply to all elements in this subdiagram:
-
-            %(Collection_kwdoc)s
-
         Note that *x* and *columns* must be sequences of the same length.
+
+        %(Collection_kwdoc)s
         """
         self.stale = True  # This only tracks form/layout and not style changes
         self._x = _to_valid_arrays(x, 'x')
         self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
-        _blockprops = dict(blockprops) or dict()
-        self._blockprops = normed_kws(_blockprops, _Block._artistcls)
-        _flowprops = dict(flowprops) or dict()
-        self._flowprops = normed_kws(_flowprops, _Flow._artistcls)
-        # TODO: this is only needed because we allow kwargs not just blockprops and flowprops
-        self._distribute_kwargs(kwargs)  # sets 'width' in _blockprops
-        # TODO: remove layout relevant properties (put defaults in rcP?)
-        self._width = self._blockprops.pop('width')
-        self._ha = self._blockprops.pop('ha', 'center')
-        self._va = self._blockprops.pop('va', 'center')
+        _blockprops = normed_kws(blockprops or dict(), _Block._artistcls)
+        # separate block layout parameter from styling parameter:
+        self._block_init = self.split_inits(_blockprops)
+        self._blockprops = _blockprops
+        # flows only have style parameter anyways
+        self._flowprops = normed_kws(flowprops or dict(), _Flow._artistcls)
 
         # create the columns of Blocks
         columns = list(columns)
@@ -1307,8 +1312,7 @@ class SubDiagram:
                 self._columns.append(column)
         else:
             for col in columns:
-                column = [_Block(size, width=self._width, ha=self._ha, va=self._va)
-                          for size in col]
+                column = [_Block(size, **self._block_init) for size in col]
                 self._columns.append(column)
                 _blocks.extend(column)
         self._nbr_columns = len(self._columns)
@@ -1327,8 +1331,7 @@ class SubDiagram:
         self._xlim = None
         self._ylim = None
 
-        self._blocks = _ProxyCollection(_blocks, label=label,
-                                        **self._blockprops)
+        self._blocks = _ProxyCollection(_blocks, label=label)
         # create the Flows is only based on *flows* and *extout*'s
         _flows = []
         # connect source and target:
@@ -1344,7 +1347,7 @@ class SubDiagram:
                     if flow:
                         _flows.append(_Flow(flow=flow, source=s_col[j],
                                             target=t_col[i]))
-        self._flows = _ProxyCollection(_flows, label=label, **self._flowprops)
+        self._flows = _ProxyCollection(_flows, label=label)
         self._hspace = hspace
         self._hspace_combine = hspace_combine
         self.set_layout(layout)
@@ -1385,8 +1388,8 @@ class SubDiagram:
         self._xlim = xmin, xmax
         self._ylim = ymin, ymax
 
-    def get_blocks(self):
-        return self._blocks
+    # def get_blocks(self):
+    #     return self._blocks
 
     def get_ylim(self,):
         if self.stale:
@@ -1394,6 +1397,7 @@ class SubDiagram:
         return self._ylim
 
     def get_minwidth(self,):
+        """Returns the smallest block width."""
         mwidth = self._blocks[0].get_width()
         for col in self._columns:
             for block in col:
@@ -1420,9 +1424,9 @@ class SubDiagram:
             ymargin = self._hspace / max(len(col) for col in self._columns)
         return xmin - xmargin, ymin - ymargin, xmax + xmargin, ymax + ymargin
 
-    def get_layout(self):
-        """Get the layout of this diagram"""
-        return self._layout
+    # def get_layout(self):
+    #     """Get the layout of this diagram"""
+    #     return self._layout
 
     def get_columns(self,):
         """Get all columns of this subdiagram"""
@@ -1430,9 +1434,9 @@ class SubDiagram:
             self.generate_layout()
         return self._columns
 
-    def get_column(self, col_id):
-        """TODO: write docstring."""
-        return self._columns[col_id]
+    # def get_column(self, col_id):
+    #     """TODO: write docstring."""
+    #     return self._columns[col_id]
 
     def get_block(self, identifier):
         """TODO: write docstring."""
@@ -1506,19 +1510,6 @@ class SubDiagram:
                 # raise NotImplementedError("The optimized layout is not yet"
                 #                          " implemented")
         self.stale = False
-
-    def add_block(self, column: int, block):
-        """Add a Block to a column."""
-        self._blocks.add_proxy(block)
-        self._columns[column].append(block)
-        self.stale = True
-
-    # def add_flow(self, column, flow):
-    #     """TODO: write docstring."""
-    #     # TODO: _columns can only contain indices for blocks
-    #     # self._columns[column].append(flow)
-    #     self.stale = True
-    #     pass
 
     def get_column_hspace(self, col_id):
         """TODO: write docstring."""
@@ -1710,7 +1701,8 @@ class SubDiagram:
                 ) / sum(weights)
         # assert n1.get_y() < n2.get_y()
         # TODO: Cannot recreate the thought process behind this...
-        inv_mid_height = [blocks[0].get_y() + blocks[1].get_height() + hspace + 0.5 * blocks[0].get_height(),
+        inv_mid_height = [blocks[0].get_y() + blocks[1].get_height() +
+                          hspace + 0.5 * blocks[0].get_height(),
                           blocks[0].get_y() + 0.5 * blocks[1].get_height()]
         squared_diff_inf = {}
         for i, block in enumerate(blocks):
@@ -1739,46 +1731,12 @@ class SubDiagram:
         else:
             return False
 
-    def _distribute_kwargs(self, kwargs):
-        """
-        Check for block/flow specific kwargs and move them to
-        block-/flowprops
-        """
-        _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
-        cmap = _kwargs.pop('cmap', None)
-        if cmap is not None:
-            if self._blockprops.get('cmap', None) is None:
-                self._blockprops.update(
-                    dict(cmap=cmap, norm=_kwargs.pop('norm', None),
-                         mappable=_kwargs.pop('mappable', None))
-                )
-        self._blockprops['width'] = self._blockprops.get('width',
-                                                         kwargs.pop('width',
-                                                                    None))
-
-        self._kwargs = _kwargs
-
-    # # TODO: is this still needed? if yes, automate or use _singular_props
-    # @classmethod
-    # def separate_kwargs(cls, kwargs):
-    #     """Separate all relevant kwargs for the init if a SubDiagram."""
-    #     sdkwargs, other_kwargs = dict(), dict()
-    #     sd_args = ['x', 'columns', 'match_original', 'yoff', 'layout',
-    #                'hspace_combine', 'label_margin', 'cmap', 'norm',
-    #                'mappable', 'blockprops', 'flowprops', 'width']
-    #     for k, v in kwargs.items():
-    #         if k in sd_args:
-    #             sdkwargs[k] = v
-    #         else:
-    #             other_kwargs[k] = v
-    #     return sdkwargs, other_kwargs
-
     def create_block_artists(self, ax, **kwargs):
         if self._blocks:
             if self.stale:
                 self.generate_layout()
             _kwargs = dict(kwargs)
-            _kwargs.update(self._kwargs)
+            _kwargs.update(self._blockprops)
             _blockkws = normed_kws(_kwargs, self._blocks._artistcls)
             # blocks should have their edges drawn, so if only fc is provided
             # we complete it here. Note that normalize_kwargs is called only
@@ -1793,7 +1751,7 @@ class SubDiagram:
     def create_flow_artists(self, ax, **kwargs):
         if self._flows:
             _kwargs = dict(kwargs)
-            _kwargs.update(self._kwargs)
+            _kwargs.update(self._flowprops)
             if self.stale:
                 self.generte_layout()
                 self.create_block_artists(self, ax=ax, **kwargs)
@@ -1801,25 +1759,8 @@ class SubDiagram:
             self._flows.create_artist(ax=ax, **_kwargs)
 
 
-def init_form_defaults(callabs, cls=None):
-    """Returns names of all parameter of callabs that have default values."""
-    if cls is None:  # Return the actual class decorator.
-        return functools.partial(init_form_defaults, callabs)
-
-    layout_params = set()
-    for callab in callabs:
-        params = inspect.signature(callab).parameters
-        layout_params.update((param for param in params
-                              if params[param].default != inspect._empty))
-    layout_params = layout_params.difference(
-        {param for param in inspect.signature(cls).parameters}
-    )
-    cls._form_defaults = layout_params
-    return cls
-
-
-@init_form_defaults((_Block, SubDiagram))
-class Alluvial:
+@init_defaults((SubDiagram,))
+class Alluvial(_Initiator):
     """
     Alluvial diagram.
 
@@ -1908,15 +1849,8 @@ class Alluvial:
         if x is not None:
             self._x = _to_valid_arrays(x, 'x')
             self.ax.xaxis.update_units(self._x)
-
         else:
             self._x = None
-        # store normalized styling properties
-        self._blockprops = normed_kws(blockprops, _ProxyCollection._artistcls)
-        self._flowprops = normed_kws(flowprops, _ProxyCollection._artistcls)
-        # nothing to set for blocks for now
-        self._inject_default_blockprops()
-        self._inject_default_flowprops()
         self._diagrams = []
         self._cross_flows = []
         self._tags = defaultdict(_Tag)
@@ -1930,6 +1864,8 @@ class Alluvial:
         # now handle the kwargs
         # normalize whatever there is
         _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
+        _blockprops = normed_kws(blockprops, _ProxyCollection._artistcls)
+        _flowprops = normed_kws(flowprops, _ProxyCollection._artistcls)
         # setting up coloring (to be added to styling defaults in get_defaults)
         fc = _kwargs.pop('facecolor', None)
         if fc is None:
@@ -1944,20 +1880,25 @@ class Alluvial:
             ext = _kwargs.pop('ext', None)
             extout = _kwargs.pop('extout', None)
             fractionflow = _kwargs.pop('fractionflow', None)
-            # separate layout parameter from styling parameter, get the layout:
-            self._defs_form = {k: _kwargs.pop(k) for k in self._form_defaults
-                               if _kwargs.get(k, None) is not None}
+            # separate init parameter for a subdiagram:
+            self._subd_init = self.split_inits(_kwargs)
+            # whatever remains is used as basis for blockprops and flowprops
+            self._set_blockprops(_blockprops, _kwargs)
+            self._set_flowprops(_flowprops, _kwargs)
             # what remains are styling defaults and will be passed down when
             # calling `.finish`
             self._defaults = _kwargs
             if flows is not None or ext is not None:
                 self.add(flows=flows, ext=ext, extout=extout,
-                         fractionflow=fractionflow, x=self._x,
-                         **self._defs_form)
+                         fractionflow=fractionflow,
+                         blockprops=self._block_init, flowprops=self._flowprops,
+                         **self._subd_init)
                 self.finish()
         else:
             self._defaults = dict()
-            self._defs_form = dict()
+            self._subd_init = dict()
+            self._set_blockprops(_blockprops)
+            self._set_flowprops(_flowprops)
 
     def get_x(self):
         """Return the sequence of x coordinates of the Alluvial diagram"""
@@ -2018,20 +1959,30 @@ class Alluvial:
             pass  # TODO: check extout format
         return columns, flows
 
-    def _inject_default_blockprops(self,):
+    def _set_blockprops(self, block_kws, other_kws=None):
         """Completing styling properties of blocks with sensible defaults."""
-        # TODO: Note that this overwrites properties passed in kwargs of
-        #       Alluvial.add. > Only allow blockprops and flowprops?
         # TODO: put values to rcParams
-        self._blockprops['linewidth'] = self._blockprops.get('linewidth', 1.0)
+        self._blockprops = dict(
+            linewidth=1.0,
+        )
+        if other_kws is not None:
+            self._blockprops.update(other_kws)
+        self._blockprops.update(block_kws)
+        # separate layout specific parameters
+        self._block_init = SubDiagram.split_inits(self._blockprops)
 
-    def _inject_default_flowprops(self,):
+    def _set_flowprops(self, flow_kws, other_kws=None):
         """Completing styling properties of flows with sensible defaults."""
-        self._flowprops['alpha'] = self._flowprops.get('alpha', 0.7)
-        # TODO: only do this if dcs are colored by tags as > match_original
-        self._flowprops['facecolor'] = self._flowprops.get('facecolor',
-                                                           'source')
-        self._flowprops['linewidth'] = self._flowprops.get('linewidth', 0.0)
+        self._flowprops = dict(
+            alpha=0.7,
+            facecolor='source',  # TODO: avoid since > match_original == True
+            linewidth=0.0
+        )
+        if other_kws is not None:
+            self._flowprops.update(other_kws)
+        self._flowprops.update(flow_kws)
+        # note: flows have no default layout parameters
+        self._flow_init = dict()
 
     def get_defaults(self,):
         """TODO: write docstring."""
@@ -2233,9 +2184,8 @@ class Alluvial:
         columns, flows = self._to_cols_and_flows(cinit, flows, ext, extout,
                                                  fractionflow)
 
-        # do not yet handle x axis
-        # x, columns = self._determine_x(x, columns)
         # TODO: extout are not processed so far
+
         self._extouts.append(extout)
         return self._add(columns=columns, flows=flows, **kwargs)
 
@@ -2293,28 +2243,27 @@ class Alluvial:
         # x, columns = self._determine_x(x, columns)
         return self._add(columns, flows, **kwargs)
 
-    def _add(self, columns, flows, **kwargs):
+    def _add(self, columns, flows, blockprops=None, flowprops=None, **kwargs):
         """TODO: write docstring."""
-        # Note: here the defaults from alluvial are passed to the new
-        # subdiagram (is relevant for those for the proxies, like layout)
-        # defaults are actually passed once again when calling
-        # _create_collection. It would be better to separated proxy specific
-        # (actually specific to SubDiagram) form artist specific keywords and
-        # pass the proxy specific here and the artist specific in
-        # _create_collection
-        _kwargs = dict(self._defs_form)
-        _kwargs.update(normed_kws(kwargs, _ProxyCollection._artistcls))
-        _blockprops = dict(self._blockprops)
-        _blockprops.update(normed_kws(_kwargs.pop('blockprops', {}),
-                                      _ProxyCollection._artistcls))
-        _flowprops = dict(self._flowprops)
-        _flowprops.update(normed_kws(_kwargs.pop('flowprops', {}),
-                                     _ProxyCollection._artistcls))
+        # get the default initiation parameters for a subdiagram
+        _subd_init = dict(self._subd_init)
+        _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
+        # use the provided kwargs to update the initiation parameter
+        _subd_init.update(self.split_inits(_kwargs))
+        _blockprops = dict(self._block_init)  # pass the default init props
+        _blockprops.update(_kwargs)  # update blockprops with kwargs
+        if blockprops is not None:
+            _blockprops.update(normed_kws(blockprops, _ProxyCollection._artistcls))
+        _flowprops = dict(self._flow_init)  # pass the default init props
+        _flowprops.update(_kwargs)
+        if flowprops is not None:
+            _flowprops.update(normed_kws(flowprops, _ProxyCollection._artistcls))
         # set a default label for a subdiagram
         label = _kwargs.pop('label', f'diagram-{self._diagc}')
         diagram = SubDiagram(columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
-                             **_kwargs)
+                             **_subd_init)
+        # get the styling params
         self._add_diagram(diagram)
         self._diagc += 1
         return diagram

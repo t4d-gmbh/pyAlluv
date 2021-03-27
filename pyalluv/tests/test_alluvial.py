@@ -46,7 +46,7 @@ class TestAlluvialFlows:
                              ref_columns):
         # test creation of alluvial via __init__ directly.
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
-                            layout=layout, width=1)
+                            layout=layout, blockprops=dict(width=1))
         _test_block_ordering(alluvial, ref_columns=ref_columns)
 
     # @pytest.mark.skip(reason="later")
@@ -55,7 +55,7 @@ class TestAlluvialFlows:
         # test creation of alluvial diagram with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
-                     layout=layout, width=1)
+                     layout=layout, blockprops=dict(width=1))
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         _test_block_ordering(alluvial, ref_columns=ref_columns)
@@ -66,9 +66,9 @@ class TestAlluvialFlows:
         # several sub diagrams with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
-                     layout=layout, width=1)
+                     layout=layout, blockprops=dict(width=1))
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow, yoff=2,
-                     layout=layout, width=1)
+                     layout=layout, blockprops=dict(width=1))
         alluvial.finish()
         # TODO: ordering might not really what is to test here
         _test_block_ordering(alluvial, ref_columns=ref_columns)
@@ -93,7 +93,8 @@ test_ids = ['memberships-conversion', 'memberships-df-conversion']
                          ids=test_ids)
 class TestAlluvialMemberships:
     def test_memberships_conversion(self, memberships, ref_columns, ref_flows):
-        alluvial = Alluvial.from_memberships(memberships, width=0.3, layout='centered')
+        alluvial = Alluvial.from_memberships(memberships, layout='centered',
+                                             blockprops=dict(width=0.3))
         alluvial.finish()
         _test_block_ordering(alluvial, ref_columns)
 
@@ -113,7 +114,7 @@ class TestAlluvialLayout:
     @pytest.mark.devtest
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
-                            layout=layout, width=0.2)
+                            layout=layout, blockprops=dict(width=0.2))
         _test_block_ordering(alluvial, ref_columns=ref_columns)
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
@@ -129,13 +130,13 @@ class TestAlluvialLayout:
         from pyalluv import Alluvial
         a = Alluvial.from_memberships(
             [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
-            width=0.2, hspace_combine='divide'
+            blockprops=dict(width=0.2), hspace_combine='divide'
         )
         a.add_form_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
-                               layout='top', width=0.2,
+                               layout='top', blockprops=dict(width=0.2),
                                hspace_combine='divide', yoff=-2)
         a.add_from_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
-                               layout='bottom', width=0.2,
+                               layout='bottom', blockprops=dict(width=0.2),
                                hspace_combine='divide', yoff=2)
         a.finish()
         a.ax.set_xlim(-1, 4)
@@ -165,7 +166,7 @@ class TestAlluvialStyling:
         # ###
         # tesax
         # draw an alluvial with 1 diagram 2 cols, 3 blocks and no flows
-        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, ha='center')
+        alluvial = Alluvial(x=[0, 2], ax=tesax, blockprops=dict(width=1, ha='center'))
         diagram0 = alluvial.add(flows=None, ext=[[3, 1], [2]], layout='bottom',
                                 blockprops=style)
         # set the styling of a single block
@@ -211,7 +212,8 @@ class TestAlluvialStyling:
         # ###
         # texax
         # set fc to blue for the entire alluvial plot
-        alluvial = Alluvial(x=[0, 2], ax=tesax, width=1, fc=alluv_c, blockprops=style)
+        style['width'] = 1
+        alluvial = Alluvial(x=[0, 2], ax=tesax, fc=alluv_c, blockprops=style)
         # Test defaults form Alluvial:
         alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom', **style)
         # Test SubD > Alluvial:
@@ -285,8 +287,8 @@ class TestAlluvialStyling:
         alluv.register_tag('tag0', cmap=blues, mappable='x')
         # alluv.register_tag('tag0')
         alluv.tag_blocks('tag0', 0, None, -1)  # get top block in all cols
-        alluv.add(flows=None, ext=[*zip(heights[6:])], cmap=reds,
-                  mappable='x', yoff=7)
+        alluv.add(flows=None, ext=[*zip(heights[6:])],
+                  blockprops=dict(cmap=reds, mappable='x'), yoff=7)
         alluv.finish()
         # ###
         # set common limits and axis styling

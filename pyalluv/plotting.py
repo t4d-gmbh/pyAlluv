@@ -1914,10 +1914,6 @@ class Alluvial(_Initiator):
         x : sequence of scalars
             Sequence of M scalars setting the x coordinates for all columns in
             all subdiagrams.
-
-        Note that setting the coordinates will have no effect on subdiagrams
-        that were already added. Only further calls of :meth:`add` will use the
-        new x coordinates as default horizontal positioning.
         """
         if x is None:
             self._x = None
@@ -2366,6 +2362,7 @@ class Alluvial(_Initiator):
         x_positions = self.x_collected()
         x0 = cbook.safe_first_element(x_positions)
         if isinstance(x0, datetime):
+            # NOTE: maybe it's not ideal to use autolocator here...
             majloc = self.ax.xaxis.set_major_locator(AutoDateLocator())
             self.ax.xaxis.set_major_formatter(AutoDateFormatter(majloc))
         else:

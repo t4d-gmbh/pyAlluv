@@ -1,15 +1,15 @@
 """
-=================================
-Alluvial Demo - Network structure
-=================================
+================================
+Alluvial Demo - Membership based
+================================
 
 Draw Alluvial diagram based on membership lists to reflect changes in network
 structure.
 """
-import matplotlib.pyplot as plt
 import numpy as np
 # from matplotlib.alluvial import Alluvial
 from pyalluv import Alluvial
+import matplotlib.pyplot as plt
 
 # Consider a small network of 4 nodes with membership lists at 3 point in time:
 memberships = [[0, 1, 1, 2],  # t1
@@ -24,30 +24,31 @@ Alluvial.from_memberships(memberships, layout='top', x=['t1', 't2', 't3'],
 plt.show()
 
 #############################################################################
-# =======================
-# Alluvial Demo - Layouts
-# =======================
+# ==========================
+# Alluvial Demo - Flow based
+# ==========================
 #
-# Draw Alluvial diagrams with different layouts
+# Draw Alluvial using flow matrices
 #
 import matplotlib.pyplot as plt
 import numpy as np
 # from matplotlib.alluvial import Alluvial
 from pyalluv import Alluvial
 
-memberships = [[0, 1, 1, 2],  # t1
-               [3, 0, 1, 2],  # t2
-               [1, 0, 1, 1]]  # t3
+ext = np.array([1, 2, 1])
+flows = np.array([[[0, 1, 0],
+                   [0, 1, 0],
+                   [0, 0, 1],
+                   [1, 0, 0]],
+                  [[0, 1, 0, 0],
+                   [1, 0, 1, 1]]])
+# memberships = [[0, 1, 1, 2],  # t1
+#                [3, 0, 1, 2],  # t2
+#                [1, 0, 1, 1]]  # t3
 
-layouts = ['centered', 'bottom', 'top']
-y_offsets = [0, 3, -3]
-alluv = Alluvial(x=['t1', 't2', 't3'], width=0.4)
-for layout, yoff in zip(layouts, y_offsets):
-    # Create an alluvial diagram based on the memberships using a centered layout
-    alluv.add_from_memberships(memberships, layout=layout, yoff=yoff)
-# TODO: Adding labels for sub-diagrams
-# Tell alluvial to determine the layout and draw the diagrams
-alluv.finish()
+# Create an alluvial diagram based on the memberships
+alluv = Alluvial(x=['t1', 't2', 't3'], flows=flows, ext=ext, width=0.2, yoff=0,
+                 layout=['top', 'optimized', 'top'])
 
 plt.show()
 

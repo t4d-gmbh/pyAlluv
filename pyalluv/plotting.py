@@ -7,25 +7,25 @@ from collections import defaultdict
 from weakref import WeakValueDictionary
 import numpy as np
 import matplotlib as mpl
+from datetime import datetime
+# from bisect import bisect_left
 from matplotlib.cbook import index_of
 from matplotlib.cbook import normalize_kwargs as normed_kws
 from matplotlib.collections import PatchCollection
-# from matplotlib import docstring
 from matplotlib import _api, cbook, cm
-# from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
 from matplotlib.artist import Artist
+# from matplotlib import docstring
+# from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
 # from matplotlib import transforms
 # from matplotlib import _api
 # import matplotlib.dates as mdates
 from matplotlib.path import Path
 from matplotlib.patches import Rectangle
-import matplotlib.patches as patches
 from matplotlib.rcsetup import cycler
 from matplotlib.legend import Legend
-import matplotlib.ticker as mticker
 from matplotlib.dates import date2num, AutoDateLocator, AutoDateFormatter
-from datetime import datetime
-from bisect import bisect_left
+import matplotlib.ticker as mticker
+import matplotlib.patches as patches
 
 _log = logging.getLogger(__name__)
 
@@ -1218,8 +1218,12 @@ class SubDiagram(_Initiator):
             ... *TODO*
         label : str, optional
             Label of the diagram.
-        yoff : int or float, default: 0
-            A constant vertical offset applied to the added diagram.
+        yoff : int, float or sequence thereof, default: 0
+            Vertical offset applied to the added diagram. A single value sets
+            the offset for the first column, any sequential column determines
+            the offset by minimizing the vertical displacement of the flows. If
+            a sequence is provided it sets for each column the vertical offset
+            explicitly and must be of the same length as *columns*.
         hspace : float, (default=1)
             The height reserved for space between blocks expressed as a
             float in the same unit as the block heights.
@@ -1285,7 +1289,6 @@ class SubDiagram(_Initiator):
         """
         self.stale = True  # This only tracks form/layout and not style changes
         self._x = _to_valid_arrays(x, 'x')
-        self._yoff = yoff
         # Note: both _block-/_flowprops must be normalized already
         _blockprops = normed_kws(blockprops or dict(), _Block._artistcls)
         # separate block layout parameter from styling parameter:
@@ -1349,7 +1352,7 @@ class SubDiagram(_Initiator):
         self._flows = _ProxyCollection(_flows, label=label)
         self._hspace = hspace
         self._hspace_combine = hspace_combine
-        self.set_layout(layout)
+        self.init_layout_yoff(layout, yoff)
         # TODO: setting label position is not implemented yet
         self._label_margin = label_margin
         self.generate_layout()
@@ -1468,12 +1471,11 @@ class SubDiagram(_Initiator):
         #                    layout=layout)
         self._layout[col_id] = layout
 
-    def get_column_layout(self, col_id):
-        """Get the layout of a single column."""
-        return self._layout[col_id]
-
-    def set_layout(self, layout):
-        """Set the layout for this diagram"""
+    def init_layout_yoff(self, layout, yoff):
+        """Set the layout and vertical offset for all columns."""
+        if not np.iterable(yoff):
+            yoff = self._nbr_columns * [yoff]
+        self._yoff = yoff
         if isinstance(layout, str):
             # TODO: uncomment once in mpl
             # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
@@ -1494,20 +1496,20 @@ class SubDiagram(_Initiator):
             # TODO: handle the layout parameter
             self._distribute_blocks(col_id)
         # now check if some columns are optimized
-        if any(layout == 'optimized' for layout in self._layout):
-            optimizing_col = [i for i, layout in enumerate(self._layout)
-                              if layout == 'optimized']
+        optimizing_col = [i for i, layout in enumerate(self._layout)
+                          if layout == 'optimized']
+        if len(optimizing_col):
             for col_id in optimizing_col:
                 # # now sort again considering the flows.
                 self._decrease_flow_distances(col_id)
-            for col_id in optimizing_col:
-                # # perform pairwise swapping for backwards flows
-                self._pairwise_swapping(col_id)
-            for col_id in optimizing_col[::-1]:
-                # # perform pairwise swapping for backwards flows
-                self._pairwise_swapping(col_id)
-                # raise NotImplementedError("The optimized layout is not yet"
-                #                          " implemented")
+            # for col_id in optimizing_col:
+            #     # # perform pairwise swapping for backwards flows
+            #     self._pairwise_swapping(col_id)
+            # for col_id in optimizing_col[::-1]:
+            #     # # perform pairwise swapping for backwards flows
+            #     self._pairwise_swapping(col_id)
+            #     # raise NotImplementedError("The optimized layout is not yet"
+            #     #                          " implemented")
         self.stale = False
 
     def get_column_hspace(self, col_id):
@@ -1548,7 +1550,9 @@ class SubDiagram(_Initiator):
 
         """
         nbr_blocks = len(self._columns[col_id])
-        layout = self.get_column_layout(col_id)
+        layout = self._layout[col_id]
+        yoff = self._yoff[col_id]
+        # NOTE: getting layout and yoff here but also passing col_id to _update_yorrd is not really clean
         col_hspace = self.get_column_hspace(col_id)
         if nbr_blocks:
             # sort clusters according to height
@@ -1559,11 +1563,11 @@ class SubDiagram(_Initiator):
             if layout == 'top':
                 # TODO: do the reordering outside if/elif/else (after)
                 self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout)
+                self._update_ycoords(col_id, col_hspace, layout, yoff)
             elif layout == 'bottom':
                 ordering = ordering[::-1]
                 self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout)
+                self._update_ycoords(col_id, col_hspace, layout, yoff)
             # in both cases no further sorting is needed
             else:
                 # sort so to put biggest height in the middle
@@ -1571,45 +1575,45 @@ class SubDiagram(_Initiator):
                     ordering[nbr_blocks % 2::2][::-1]
                 # update the ordering the update the y coords
                 self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout)
+                self._update_ycoords(col_id, col_hspace, layout, yoff)
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
         _column = self._columns[col_id]
-        # TODO: does not really make sense to recompute them here
-        nbr_blocks = len(_column)
-        layout = self.get_column_layout(col_id)
+        layout = self._layout[col_id]
+        yoff = self._yoff[col_id]
         col_hspace = self.get_column_hspace(col_id)
-        old_mid_heights = [block.get_yc() for block in _column]
         # do the redistribution a certain amount of times
         _redistribute = False
         for _ in range(self._redistribute_vertically):
-            # TODO: check this as soon as Flows are set-up correctly
+            new_ycs = []
             for block in _column:
                 weights = []
-                positions = []
+                difference = []
+                b_yc = block.get_yc()
                 for in_flow in block.inflows:
                     if in_flow.source is not None:
                         weights.append(in_flow.flow)
-                        positions.append(in_flow.source.get_yc())
-                if sum(weights) > 0.0:
+                        difference.append(b_yc - in_flow.source.get_yc())
+                if weights:
                     _redistribute = True
-                    block.set_yc(sum([
-                        weights[i] * positions[i]
-                        for i in range(len(weights))
-                    ]) / sum(weights))
+                    new_ycs.append(
+                        b_yc - sum(w * d for w, d in
+                                   zip(weights, difference)) / sum(weights)
+                    )
+                else:
+                    new_ycs.append(b_yc)
             if _redistribute:
-                sort_key = [bisect_left(old_mid_heights, block.get_yc())
-                            for block in _column]
-                cs, _sort_key = zip(
-                    *sorted(zip(list(range(nbr_blocks)), sort_key,),
-                            key=lambda x: x[1])
-                )
+                # set the new centers provisionally
+                for block, nyc in zip(_column, new_ycs):
+                    block.set_yc(nyc)
+                # update the block order
+                cs, _bc = zip(*sorted(((i, bc) for i, bc in enumerate(new_ycs)),
+                                      key=lambda x: x[1]))
+                # reorder blocks
                 self._reorder_column(col_id, ordering=cs)
                 # redistribute them
-                self._update_ycoords(col_id, col_hspace, layout)
-                old_mid_heights = [block.get_yc()
-                                   for block in self._columns[col_id]]
+                self._update_ycoords(col_id, col_hspace, layout, yoff)
             else:
                 break
 
@@ -1645,7 +1649,29 @@ class SubDiagram(_Initiator):
         self._columns[col_id] = [_column[newid] for newid in ordering]
         self.stale = True
 
-    def _update_ycoords(self, column: int, hspace, layout):
+    def _best_offset(self, column):
+        """
+        Determine yoff of this column that minimizes vert. flows with the
+        previous column.
+        """
+        weights = []
+        difference = []
+        for block in column:
+            b_yc = block.get_yc()
+            for in_flow in block.inflows:
+                if in_flow.source is not None:
+                    weights.append(in_flow.flow)
+                    difference.append(b_yc - in_flow.source.get_yc())
+        if sum(weights) == 0:
+            return 0
+        return -sum(w * d for w, d in zip(weights, difference)) / sum(weights)
+
+    def set_column_y(self, column, y_start, hspace):
+        for block in column:
+            block.set_y(y_start)
+            y_start += block.get_height() + hspace
+
+    def _update_ycoords(self, col_id: int, hspace, layout, yoff):
         """
         Update the y coordinate of the blocks in a column based on the
         diagrams vertical offset, the layout chosen for this column and the
@@ -1653,28 +1679,37 @@ class SubDiagram(_Initiator):
 
         Parameters
         ----------
-        column : int
+        col_id : int
             Index of the column to reorder.
         """
-        displace = self._yoff
-        _column = self._columns[column]
-        for block in _column:
-            block.set_y(displace)
-            displace += block.get_height() + hspace
-        # now offset to center
-        low = _column[0].get_y()  # this is just self._yoff
-        # this is just `displace`:
-        high = _column[-1].get_y() + _column[-1].get_height()
-
-        if layout == 'centered' or layout == 'optimized':
-            _offset = 0.5 * (high - low)
-        elif layout == 'top':
-            _offset = (high - low)
+        _column = self._columns[col_id]
+        if not _column:
+            return
+        # distribute block according to ordering
+        if _column[0].get_y() is None:
+            ystart = yoff
+        elif layout == 'optimized' and col_id:
+            ystart = self._columns[col_id - 1][0].get_y()
         else:
-            _offset = 0
-        if _offset:
-            for block in _column:
-                block.set_y(block.get_y() - _offset)
+            ystart = _column[0].get_y()
+        self.set_column_y(_column, ystart, hspace)
+        # determine the y offset of the entire column
+        if layout == 'optimized':
+            yoff = self._best_offset(_column)
+        else:
+            low = _column[0].get_y()
+            high = _column[-1].get_y() + _column[-1].get_height()
+
+            if layout == 'centered':
+                _offset = 0.5 * (high - low)
+            elif layout == 'top':
+                _offset = (high - low)
+            else:
+                _offset = 0
+            yoff -= _offset
+        # set the y position again including the offset
+        y_position = _column[0].get_y() + yoff
+        self.set_column_y(_column, y_position, hspace)
         self.stale = True
 
     def _swap_blocks(self, blocks, hspace, direction='backwards'):

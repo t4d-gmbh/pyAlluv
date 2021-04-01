@@ -2396,11 +2396,13 @@ class Alluvial(_Initiator):
         x_positions = self.x_collected()
         x0 = cbook.safe_first_element(x_positions)
         if isinstance(x0, datetime):
-            # NOTE: maybe it's not ideal to use autolocator here...
-            majloc = self.ax.xaxis.set_major_locator(AutoDateLocator())
+            majloc = self.ax.xaxis.set_major_locator(
+                mticker.FixedLocator(date2num(x_positions),
+                                     self.max_nbr_xticks - 1)
+            )
             self.ax.xaxis.set_major_formatter(AutoDateFormatter(majloc))
         else:
-            self.ax.xaxis.set_major_locator(
+            majloc = self.ax.xaxis.set_major_locator(
                 mticker.FixedLocator(x_positions, self.max_nbr_xticks - 1)
             )
         xmin, ymin, xmax, ymax = self.determine_viewlim()

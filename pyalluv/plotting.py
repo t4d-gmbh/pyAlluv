@@ -23,7 +23,7 @@ from matplotlib.path import Path
 from matplotlib.patches import Rectangle
 from matplotlib.rcsetup import cycler
 from matplotlib.legend import Legend
-from matplotlib.dates import date2num, AutoDateLocator, AutoDateFormatter
+from matplotlib.dates import date2num, AutoDateFormatter
 import matplotlib.ticker as mticker
 import matplotlib.patches as patches
 
@@ -278,6 +278,7 @@ class _ArtistProxy:
         # TODO: not sure if stale is needed for this
         self.stale = True   # This only tracks form/layout but no style changes
         self._tags = []     # list of tag identifiers (label of a tag)
+        self._label = label
         if tags is not None:
             for tag in tags:
                 self.add_tag(tag)
@@ -297,11 +298,21 @@ class _ArtistProxy:
     #     """Return the list of tags."""
     #     return self._tags
 
+    def get_label(self):
+        if self._artist is not None:
+            return self._artist.get_label()
+        else:
+            return self._label
+
     def add_tag(self, tag):
         """Adding a new tag to the proxy."""
         if tag not in self._tags:
             tag.register_proxy(self)
             self._tags.append(tag)
+
+    def default_label_location(self):
+        """Initiate the artist."""
+        raise NotImplementedError('Derived must override')
 
     def remove_tag(self, tag):
         """Removing a tag."""
@@ -610,6 +621,13 @@ class _Block(_ArtistProxy):
             self._ya -= 0.5 * self._height
         elif self._verticalalignment == 'top':
             self._ya += 0.5 * self._height
+
+    # TODO: extend this to default values for a call to ax.annotation
+    # creating annotations must happen in finish as coords might not be set
+    # before.
+    def _default_label_location(self):
+        """Return the default annotation point used to draw the label."""
+        return self.get_x(), self.get_yc()
 
     def get_flows(self, out=False):
         if out:

@@ -44,7 +44,11 @@ flows = np.array([[[0, 1, 0],
 alluv = Alluvial(x=['t1', 't2', 't3'])
 alluv.add(flows=flows, ext=ext, width=0.2, yoff=0, layout='top')
 
+ax = alluv.ax
+
 for block in alluv.select_blocks(0, 1, -1):
     block.set_facecolor('green')
     # set the label
     block.set_label('my block')
+    ax.annotate(block.get_label(), xy=block._default_label_location(),
+                xytext=(-5, 0), xycoords='data', textcoords='offset points')

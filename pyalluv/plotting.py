@@ -2408,6 +2408,9 @@ class Alluvial(_Initiator):
             # TODO: draw the flows in extouts
             self.staled_layout = False
         self._create_collections()
+        # now add labels if required
+        # TODO: IMPLEMENT THE LABEL ADDING
+
         # do some styling of the axes
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')

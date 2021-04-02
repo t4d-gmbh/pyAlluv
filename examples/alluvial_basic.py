@@ -49,6 +49,7 @@ flows = np.array([[[0, 1, 0],
 # Create an alluvial diagram based on the memberships
 alluv = Alluvial(x=['t1', 't2', 't3'], flows=flows, ext=ext, width=0.2, yoff=0,
                  layout=['top', 'optimized', 'top'])
+# label block
 
 plt.show()
 

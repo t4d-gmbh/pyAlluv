@@ -1494,6 +1494,8 @@ class SubDiagram(_Initiator):
         if not np.iterable(yoff):
             yoff = self._nbr_columns * [yoff]
         self._yoff = yoff
+        # now define the neutral element by addition:
+        self._yz = self._yoff[0] - self._yoff[0]
         if isinstance(layout, str):
             # TODO: uncomment once in mpl
             # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
@@ -1578,22 +1580,15 @@ class SubDiagram(_Initiator):
                 *sorted(enumerate(self._columns[col_id]),
                         key=lambda x: x[1].get_height())
             )
-            if layout == 'top':
-                # TODO: do the reordering outside if/elif/else (after)
-                self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout, yoff)
-            elif layout == 'bottom':
+            # if layout == 'top':
+            if layout == 'bottom':
                 ordering = ordering[::-1]
-                self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout, yoff)
-            # in both cases no further sorting is needed
-            else:
+            elif layout == 'centered' or layout == 'optimized':
                 # sort so to put biggest height in the middle
                 ordering = ordering[::-2][::-1] + \
                     ordering[nbr_blocks % 2::2][::-1]
-                # update the ordering the update the y coords
-                self._reorder_column(col_id, ordering)
-                self._update_ycoords(col_id, col_hspace, layout, yoff)
+            self._reorder_column(col_id, ordering)
+            self._update_ycoords(col_id, col_hspace, layout, yoff)
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
@@ -1705,7 +1700,7 @@ class SubDiagram(_Initiator):
             return
         # distribute block according to ordering
         if _column[0].get_y() is None:
-            ystart = yoff
+            ystart = self._yz
         elif layout == 'optimized' and col_id:
             ystart = self._columns[col_id - 1][0].get_y()
         else:

@@ -215,7 +215,7 @@ class TestAlluvialStyling:
         style['width'] = 1
         alluvial = Alluvial(x=[0, 2], ax=tesax, fc=alluv_c, blockprops=style)
         # Test defaults form Alluvial:
-        alluvial.add(flows=None, ext=[1], yoff=yoff, layout='bottom', **style)
+        alluvial.add(flows=None, ext=[1], yoff=4, layout='bottom', **style)
         # Test SubD > Alluvial:
         diagram1 = alluvial.add(flows=None, ext=[[3], [3, 1]], layout='bottom',
                                 fc=subd_c, **style)

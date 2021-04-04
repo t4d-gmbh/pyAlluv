@@ -285,6 +285,8 @@ class _ArtistProxy:
         self._tag_props = dict()  # stores properties from tags to apply
         self._artist = None
         self._is_styled = False  # Indicates if styling properties were set
+        self._show_label = False  # Whether or not to draw its label
+        self._init_labelprops()
         self._kwargs = {}
         self.update(**kwargs)
 
@@ -297,6 +299,12 @@ class _ArtistProxy:
     # def get_tags(self):
     #     """Return the list of tags."""
     #     return self._tags
+
+    def _init_labelprops(self,):
+        """Set the default properties for the call of Axes.annotate"""
+        self._labelprops = dict()  # kwargs used to call Axes.annotate
+        pass
+        #  raise NotImplementedError('Derived must override')
 
     def get_label(self):
         if self._artist is not None:
@@ -398,7 +406,8 @@ class _ArtistProxy:
 
     def _post_creation(self, ax=None):
         """Callback after the creation and init of artist."""
-        pass
+        if self._show_label:
+            ax.annotate(self.get_label(), **self.get_labelprops())
 
     def _applicable(self, props):
         """
@@ -531,6 +540,19 @@ class _Block(_ArtistProxy):
         else:
             return self._height
 
+    def get_center(self, shift=None):
+        x = self.get_xc()
+        y = self.get_yc()
+        if shift == 'left':
+            x -= 0.5 * self.get_width()
+        elif shift == 'right':
+            x += 0.5 * self.get_width()
+        elif shift == 'top':
+            y += 0.5 * self.get_height()
+        elif shift == 'bottom':
+            y -= 0.5 * self.get_height()
+        return (x, y)
+
     # def set_x(self, x):
     #     """Set the left coordinate of the rectangle."""
     #     # TODO: take into account ha and set xa then
@@ -622,12 +644,18 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += 0.5 * self._height
 
-    # TODO: extend this to default values for a call to ax.annotation
-    # creating annotations must happen in finish as coords might not be set
-    # before.
-    def _default_label_location(self):
-        """Return the default annotation point used to draw the label."""
-        return self.get_x(), self.get_yc()
+    def _init_labelprops(self,):
+        self._labelprops = dict(
+            xy=functools.partial(self.get_center, shift='left'),
+            xytext=(-10, 0),  # text anchor
+            xycoords='data',
+            textcoords='offset points',  # or 'offset pixels'
+            verticalalignment='center',
+            horizontalalignment='right',
+        )
+
+    def get_labelprops(self):
+        return {k: v() if callable(v) else v for k, v in self._labelprops.items()}
 
     def get_flows(self, out=False):
         if out:
@@ -690,7 +718,7 @@ class _Block(_ArtistProxy):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
         self._handle_flows()
-        x0, y0, width, height = self.get_bbox().bounds
+        super()._post_creation(ax=ax)
     # ###
 
     def _request_loc(self, out: bool, width, out_pref, in_pref):
@@ -1072,6 +1100,7 @@ class _ProxyCollection(_ArtistProxy):
 
     def _post_creation(self, ax=None):
         self._artist = ax.add_collection(self._artist)
+        super()._post_creation(ax=ax)
 
     def add_proxy(self, proxy):
         """Add a Proxy."""

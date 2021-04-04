@@ -50,5 +50,4 @@ for block in alluv.select_blocks(0, 1, -1):
     block.set_facecolor('green')
     # set the label
     block.set_label('my block')
-    ax.annotate(block.get_label(), xy=block._default_label_location(),
-                xytext=(-5, 0), xycoords='data', textcoords='offset points')
+    block._show_label = True

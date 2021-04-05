@@ -26,6 +26,7 @@ from matplotlib.legend import Legend
 from matplotlib.dates import date2num, AutoDateFormatter
 import matplotlib.ticker as mticker
 import matplotlib.patches as patches
+from matplotlib.text import Text
 
 _log = logging.getLogger(__name__)
 
@@ -286,7 +287,7 @@ class _ArtistProxy:
         self._artist = None
         self._is_styled = False  # Indicates if styling properties were set
         self._show_label = False  # Whether or not to draw its label
-        self._init_labelprops()
+        self._labelprops = None
         self._kwargs = {}
         self.update(**kwargs)
 
@@ -300,17 +301,22 @@ class _ArtistProxy:
     #     """Return the list of tags."""
     #     return self._tags
 
-    def _init_labelprops(self,):
-        """Set the default properties for the call of Axes.annotate"""
-        self._labelprops = dict()  # kwargs used to call Axes.annotate
-        pass
-        #  raise NotImplementedError('Derived must override')
-
     def get_label(self):
         if self._artist is not None:
             return self._artist.get_label()
         else:
             return self._label
+
+    @classmethod
+    def default_labelprops(cls):
+        raise NotImplementedError('Derived must override')
+
+    def set_labelprops(self, props):
+        self._labelprops = normed_kws(props, Text)
+
+    def final_labelprops(self):
+        return {k: v() if callable(v) else v
+                for k, v in self._labelprops.items()}
 
     def add_tag(self, tag):
         """Adding a new tag to the proxy."""
@@ -345,6 +351,7 @@ class _ArtistProxy:
             self._tag_props.update(_tag_props)
 
     def update(self, **props):
+        # maybe this should not be called update as this call the setters
         # props = normed_kws(props, self._artistcls)
         for prop, value in props.items():
             setter = getattr(self, f"set_{prop}", None)
@@ -391,9 +398,24 @@ class _ArtistProxy:
     def _pre_creation(self, ax, **props):
         """Method handling properties foreign to the attached artist class."""
         self._set_tag_props()  # make sure to have the properties from all tags
-        props.update(self._tag_props)  # complete/overwrite with tag porperties
-        props.update(self._kwargs)  # complete/overwrite with onw properties
+        props.update(self._tag_props)  # complete/overwrite with tag properties
+        props.update(self._kwargs)  # complete/overwrite with own properties
         return props
+
+    def _applicable(self, props):
+        """
+        Separate *props* into applicable and non-applicable properties.
+        Applicable are properties for which the proxy has a 'set_' method.
+        """
+        applicable = dict()
+        nonapp = dict()
+        for prop, v in props.items():
+            # if hasattr(self, f"set_{prop}"):
+            if hasattr(self._artistcls, f"set_{prop}"):
+                applicable[prop] = v
+            else:
+                nonapp[prop] = v
+        return applicable, nonapp
 
     def _init_artist(self, ax):
         """Initiate the artist."""
@@ -404,33 +426,21 @@ class _ArtistProxy:
         _kwargs.update(self._kwargs)
         self._artist.update(_kwargs)
 
-    def _post_creation(self, ax=None):
+    def _post_creation(self, ax=None, **props):
         """Callback after the creation and init of artist."""
         if self._show_label:
-            ax.annotate(self.get_label(), **self.get_labelprops())
-
-    def _applicable(self, props):
-        """
-        Separate *props* into applicable and non-applicable properties.
-        Applicable are properties for which the proxy has a 'set_' method.
-        """
-        applicable = dict()
-        nonapp = dict()
-        for prop, v in props.items():
-            if hasattr(self._artistcls, f"set_{prop}"):
-                applicable[prop] = v
-            else:
-                nonapp[prop] = v
-        return applicable, nonapp
+            labelprops = normed_kws(props.get('labelprops',
+                                              self.default_labelprops()), Text)
+            ax.annotate(self.get_label(), **self.final_labelprops(labelprops))
 
     def create_artist(self, ax, **kwargs):
         """Create the artist of this proxy."""
         props = normed_kws(kwargs, self._artistcls)
         props = self._pre_creation(ax=ax, **props)  # run prepare callback
-        props, _nonappl_props = self._applicable(props)
-        self._init_artist(ax)                  # initiate artist with defaults
-        self._update_artist(**props)           # apply collected properties
-        self._post_creation(ax=ax)             # wrap-up callback
+        props, na_props = self._applicable(props)
+        self._init_artist(ax)                # initiate artist with defaults
+        self._update_artist(**props)         # apply collected properties
+        self._post_creation(ax, **na_props)  # wrap-up callback
 
     def get_artist(self,):
         """Returns the artist associated to this proxy."""
@@ -644,18 +654,39 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += 0.5 * self._height
 
-    def _init_labelprops(self,):
-        self._labelprops = dict(
-            xy=functools.partial(self.get_center, shift='left'),
-            xytext=(-10, 0),  # text anchor
+    @classmethod
+    def default_labelprops(cls,):
+        defaults = dict(
+            loc='center',
+            # xy=functools.partial(self.get_center, shift='left'),
+            xytext=(0, 0),  # text anchor
             xycoords='data',
             textcoords='offset points',  # or 'offset pixels'
             verticalalignment='center',
-            horizontalalignment='right',
+            horizontalalignment='center',
+            rotation='vertical',
+            zorder=5
         )
+        return defaults
 
-    def get_labelprops(self):
-        return {k: v() if callable(v) else v for k, v in self._labelprops.items()}
+    def final_labelprops(self, labelprops):
+        if self._labelprops is not None:
+            labelprops.update(self._labelprops)
+        loc = labelprops.pop('loc', None)
+        xy = self.get_center(shift=loc)
+        if loc == 'top' or loc == 'bottom':
+            labelprops['rotation'] = labelprops.get('rotation', 'horizontal')
+            labelprops['horizontalalignment'] = labelprops.get(
+                'horizontalalignment', 'center'
+            )
+        elif loc == 'left' or loc == 'right':
+            labelprops['rotation'] = labelprops.get('rotation', 'vertical')
+            labelprops['xytext'] = labelprops.get(
+                'xytext', (10 if loc == 'right' else -10, 0)
+            )
+        # if xy is provided it is prioritized over loc
+        labelprops['xy'] = labelprops.get('xy', xy)
+        return {k: v() if callable(v) else v for k, v in labelprops.items()}
 
     def get_flows(self, out=False):
         if out:
@@ -710,7 +741,7 @@ class _Block(_ArtistProxy):
         self._artist = self._artistcls(self.get_xy(), width=self._width,
                                        height=self._height, axes=ax)
 
-    def _post_creation(self, ax=None):
+    def _post_creation(self, ax=None, **props):
         # enforce setting the edgecolor to draw the border of the block.
         if (hasattr(self, 'own_facecolor') and not
                 hasattr(self, 'own_edgecolor') and
@@ -718,7 +749,7 @@ class _Block(_ArtistProxy):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
         self._handle_flows()
-        super()._post_creation(ax=ax)
+        super()._post_creation(ax=ax, **props)
     # ###
 
     def _request_loc(self, out: bool, width, out_pref, in_pref):
@@ -1098,9 +1129,9 @@ class _ProxyCollection(_ArtistProxy):
                 _kwargs.pop(props, None)
         self._artist.update(_kwargs)
 
-    def _post_creation(self, ax=None):
+    def _post_creation(self, ax=None, **props):
         self._artist = ax.add_collection(self._artist)
-        super()._post_creation(ax=ax)
+        super()._post_creation(ax=ax, **props)
 
     def add_proxy(self, proxy):
         """Add a Proxy."""
@@ -2040,6 +2071,11 @@ class Alluvial(_Initiator):
         if other_kws is not None:
             self._blockprops.update(other_kws)
         self._blockprops.update(block_kws)
+        # # now set properties for the labeling of blocks
+        # labelprops = _Block.default_labelporps()  # get the defaults
+        # labelprops.update(normed_kws(self._blockprops.pop('labelprops', {}),
+        #                              Text))
+        # self._blockprops['labelprops'] = labelprops
         # separate layout specific parameters
         self._block_init = SubDiagram.split_inits(self._blockprops)
 

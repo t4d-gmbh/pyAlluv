@@ -42,7 +42,7 @@ flows = np.array([[[0, 1, 0],
                    [1, 0, 1, 1]]])
 
 alluv = Alluvial(x=['t1', 't2', 't3'])
-alluv.add(flows=flows, ext=ext, width=0.2, yoff=0, layout='top')
+alluv.add(flows=flows, ext=ext, blockprops=dict(width=0.2), yoff=0, layout='top')
 
 ax = alluv.ax
 

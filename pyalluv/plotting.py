@@ -321,7 +321,7 @@ class _ArtistProxy:
         )
         return defaults
 
-    def set_labelprops(self, props):
+    def set_labelprops(self, **props):
         self._labelprops = normed_kws(props, Text)
 
     def final_labelprops(self, labelprops):
@@ -443,6 +443,7 @@ class _ArtistProxy:
         """Callback after the creation and init of artist."""
         if self._show_label:
             props = self.final_labelprops(props.get('labelprops'))
+            print('final props', props)
             ax.annotate(self.get_label(), **props)
 
     def create_artist(self, ax, **kwargs):
@@ -677,7 +678,7 @@ class _Block(_ArtistProxy):
                 'horizontalalignment', 'center'
             )
             _labelprops['xytext'] = _labelprops.get(
-                'xytext', (0, 10 if loc == 'top' else -100)
+                'xytext', (0, 10 if loc == 'top' else -10)
             )
         elif loc == 'left' or loc == 'right':
             _labelprops['rotation'] = _labelprops.get('rotation', 'vertical')
@@ -686,6 +687,7 @@ class _Block(_ArtistProxy):
             )
         else:
             _labelprops['rotation'] = _labelprops.get('rotation', 'vertical')
+            _labelprops['xytext'] = _labelprops.get('xytext', (0, 0))
 
         # if xy is provided it is prioritized over loc
         _labelprops['xy'] = _labelprops.get('xy', xy)
@@ -956,21 +958,24 @@ class _Flow(_ArtistProxy):
         # TODO: getting the center of source/target wont work, get the
         # center of outloc/inloc instead
         if loc == 'right':
-            xy = self.target.get_center(shift='left')
+            xy = self._xy0_in + 0.5 * (self._xy1_in - self._xy0_in)
             _labelprops['horizontalalignment'] = _labelprops.get(
                 'horizontalalignment', 'right'
             )
             _labelprops['xytext'] = _labelprops.get(
-                'xytext', (0, -10)
+                'xytext', (-5, 0)
             )
         # if loc == 'left':
         else:
-            xy = self.source.get_center(shift='right')
+            xy = self._xy0_out + 0.5 * (self._xy1_out - self._xy0_out)
             _labelprops['horizontalalignment'] = _labelprops.get(
                 'horizontalalignment', 'left'
             )
+            _labelprops['verticalalignment'] = _labelprops.get(
+                'verticalalignment', 'center'
+            )
             _labelprops['xytext'] = _labelprops.get(
-                'xytext', (0, 10)
+                'xytext', (5, 0)
             )
         # if xy is provided it is prioritized over loc
         _labelprops['xy'] = _labelprops.get('xy', xy)

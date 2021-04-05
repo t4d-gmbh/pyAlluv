@@ -42,7 +42,10 @@ flows = np.array([[[0, 1, 0],
                    [1, 0, 1, 1]]])
 
 alluv = Alluvial(x=['t1', 't2', 't3'])
-alluv.add(flows=flows, ext=ext, blockprops=dict(width=0.2), yoff=0, layout='top')
+alluv.add(flows=flows, ext=ext, yoff=0, layout='top',
+          blockprops=dict(width=0.2, show_label=True),
+          flowprops=dict(show_label=True, labelprops=dict(loc='center'))
+          )
 
 ax = alluv.ax
 
@@ -50,4 +53,6 @@ for block in alluv.select_blocks(0, 1, -1):
     block.set_facecolor('green')
     # set the label
     block.set_label('my block')
-    block._show_label = True
+    f = block.outflows[0]
+    f.set_label('out')
+    # block._show_label = True

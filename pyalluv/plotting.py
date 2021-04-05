@@ -308,15 +308,28 @@ class _ArtistProxy:
             return self._label
 
     @classmethod
-    def default_labelprops(cls):
-        raise NotImplementedError('Derived must override')
+    def default_labelprops(cls,):
+        defaults = dict(
+            # xy=functools.partial(self.get_center, shift='left'),
+            # xytext=(0, 0),  # text anchor
+            xycoords='data',
+            textcoords='offset points',  # or 'offset pixels'
+            verticalalignment='center',
+            horizontalalignment='center',
+            rotation='horizontal',
+            zorder=5
+        )
+        return defaults
 
     def set_labelprops(self, props):
         self._labelprops = normed_kws(props, Text)
 
-    def final_labelprops(self):
+    def final_labelprops(self, labelprops):
+        props = self.default_labelprops()
+        if labelprops is not None:
+            props.update(labelprops)
         return {k: v() if callable(v) else v
-                for k, v in self._labelprops.items()}
+                for k, v in props.items()}
 
     def add_tag(self, tag):
         """Adding a new tag to the proxy."""
@@ -429,9 +442,8 @@ class _ArtistProxy:
     def _post_creation(self, ax=None, **props):
         """Callback after the creation and init of artist."""
         if self._show_label:
-            labelprops = normed_kws(props.get('labelprops',
-                                              self.default_labelprops()), Text)
-            ax.annotate(self.get_label(), **self.final_labelprops(labelprops))
+            props = self.final_labelprops(props.get('labelprops'))
+            ax.annotate(self.get_label(), **props)
 
     def create_artist(self, ax, **kwargs):
         """Create the artist of this proxy."""
@@ -654,39 +666,31 @@ class _Block(_ArtistProxy):
         elif self._verticalalignment == 'top':
             self._ya += 0.5 * self._height
 
-    @classmethod
-    def default_labelprops(cls,):
-        defaults = dict(
-            loc='center',
-            # xy=functools.partial(self.get_center, shift='left'),
-            xytext=(0, 0),  # text anchor
-            xycoords='data',
-            textcoords='offset points',  # or 'offset pixels'
-            verticalalignment='center',
-            horizontalalignment='center',
-            rotation='vertical',
-            zorder=5
-        )
-        return defaults
-
     def final_labelprops(self, labelprops):
+        _labelprops = normed_kws(labelprops, Text)
         if self._labelprops is not None:
-            labelprops.update(self._labelprops)
-        loc = labelprops.pop('loc', None)
+            _labelprops.update(self._labelprops)
+        loc = _labelprops.pop('loc', None)
         xy = self.get_center(shift=loc)
         if loc == 'top' or loc == 'bottom':
-            labelprops['rotation'] = labelprops.get('rotation', 'horizontal')
-            labelprops['horizontalalignment'] = labelprops.get(
+            _labelprops['horizontalalignment'] = _labelprops.get(
                 'horizontalalignment', 'center'
             )
+            _labelprops['xytext'] = _labelprops.get(
+                'xytext', (0, 10 if loc == 'top' else -100)
+            )
         elif loc == 'left' or loc == 'right':
-            labelprops['rotation'] = labelprops.get('rotation', 'vertical')
-            labelprops['xytext'] = labelprops.get(
+            _labelprops['rotation'] = _labelprops.get('rotation', 'vertical')
+            _labelprops['xytext'] = _labelprops.get(
                 'xytext', (10 if loc == 'right' else -10, 0)
             )
+        else:
+            _labelprops['rotation'] = _labelprops.get('rotation', 'vertical')
+
         # if xy is provided it is prioritized over loc
-        labelprops['xy'] = labelprops.get('xy', xy)
-        return {k: v() if callable(v) else v for k, v in labelprops.items()}
+        _labelprops['xy'] = _labelprops.get('xy', xy)
+        # take the default properties and update
+        return super().final_labelprops(_labelprops)
 
     def get_flows(self, out=False):
         if out:
@@ -749,6 +753,8 @@ class _Block(_ArtistProxy):
             fc = self.get_facecolor()
             self._artist.set_edgecolor(fc)
         self._handle_flows()
+        # check if the label should be shown
+        self._show_label = self._show_label or props.get('show_label', False)
         super()._post_creation(ax=ax, **props)
     # ###
 
@@ -941,6 +947,35 @@ class _Flow(_ArtistProxy):
             self._xy1_in = np.array(top)
         self.stale = True
 
+    def final_labelprops(self, labelprops=None):
+        _labelprops = normed_kws(labelprops, Text)
+        if self._labelprops is not None:
+            _labelprops.update(self._labelprops)
+        loc = _labelprops.pop('loc', None)
+        xy = _labelprops.get('xy', None)
+        # TODO: getting the center of source/target wont work, get the
+        # center of outloc/inloc instead
+        if loc == 'right':
+            xy = self.target.get_center(shift='left')
+            _labelprops['horizontalalignment'] = _labelprops.get(
+                'horizontalalignment', 'right'
+            )
+            _labelprops['xytext'] = _labelprops.get(
+                'xytext', (0, -10)
+            )
+        # if loc == 'left':
+        else:
+            xy = self.source.get_center(shift='right')
+            _labelprops['horizontalalignment'] = _labelprops.get(
+                'horizontalalignment', 'left'
+            )
+            _labelprops['xytext'] = _labelprops.get(
+                'xytext', (0, 10)
+            )
+        # if xy is provided it is prioritized over loc
+        _labelprops['xy'] = _labelprops.get('xy', xy)
+        return super().final_labelprops(_labelprops)
+
     def update_prefs(self,):
         """Determine the preferred anchor positions on source and target"""
         # needed: s_y0, s_y1, s_yc, t_yc
@@ -1027,6 +1062,11 @@ class _Flow(_ArtistProxy):
         # TODO: dont update the artist directly as this leads to discrepancy
         # between proxy and artist.
         self._artist.update(kwargs)
+
+    def _post_creation(self, ax=None, **props):
+        # check if the label should be shown
+        self._show_label = self._show_label or props.get('show_label', False)
+        super()._post_creation(ax=ax, **props)
 
 
 @_expose_artist_getters_and_setters

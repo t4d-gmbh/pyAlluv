@@ -1,9 +1,9 @@
 """
-==========================
-Alluvial Demo - Flow based
-==========================
+========================================
+Alluvial Demo - Working with subdiagrams
+========================================
 
-Draw Alluvial using flow matrices
+An alluvial plot can consist of several vertically stacked sub-diagrams.
 
 """
 import matplotlib.pyplot as plt
@@ -22,7 +22,7 @@ extouts = [[(1, (1, 1, 2), 1)], []]
 
 # Start with an empty alluvial plot
 alluv = Alluvial(x=['t1', 't2', 't3'], blockprops=dict(width=0.2))
-# Now we add the first subdiagram
+# Add the first subdiagram
 alluv.add(flows=flows, ext=ext, extout=extouts, yoff=0,
           layout=['top', 'top', 'top'])
 # Adding a new subdiagram, using the same flows

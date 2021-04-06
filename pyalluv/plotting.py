@@ -2,31 +2,28 @@ import functools
 import inspect
 import logging
 import itertools
+import numpy as np
 from copy import copy
 from collections import defaultdict
 from weakref import WeakKeyDictionary, WeakValueDictionary
-import numpy as np
-import matplotlib as mpl
 from datetime import datetime
-# from bisect import bisect_left
+import matplotlib as mpl
+import matplotlib.ticker as mticker
+import matplotlib.patches as patches
 from matplotlib.cbook import index_of
 from matplotlib.cbook import normalize_kwargs as normed_kws
 from matplotlib.collections import PatchCollection
 from matplotlib import _api, cbook, cm
 from matplotlib.artist import Artist
-# from matplotlib import docstring
-# from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
-# from matplotlib import transforms
-# from matplotlib import _api
-# import matplotlib.dates as mdates
 from matplotlib.path import Path
 from matplotlib.patches import Rectangle
 from matplotlib.rcsetup import cycler
-from matplotlib.legend import Legend
 from matplotlib.dates import date2num, AutoDateFormatter
-import matplotlib.ticker as mticker
-import matplotlib.patches as patches
 from matplotlib.text import Text
+# from matplotlib import docstring
+# from . import (_api, _path, artist, cbook, cm, colors as mcolors, docstring,
+# from matplotlib import transforms
+# import matplotlib.dates as mdates
 
 _log = logging.getLogger(__name__)
 
@@ -2739,22 +2736,3 @@ class Alluvial(_Initiator):
         facecolor at drawing time if a colormap is provided.
         """
         self._tags[label].set(**props)
-
-
-# TODO: legend handler for subdiagram and for alluvial diagram
-class AlluvialHandler:
-    def legend_artist(self, legend, orig_handle, fontsize, handlebox):
-        x0, y0 = handlebox.xdescent, handlebox.ydescent
-        width, height = handlebox.width, handlebox.height
-        # TODO: construct a simple alluvial diag
-        patch = _Block(height=height, xa=x0, ya=y0, width=width, fc='red',
-                       transform=handlebox.get_transform())
-        # patch = mpatches.Rectangle([x0, y0], width, height, facecolor='red',
-        #                            edgecolor='black', hatch='xx', lw=3,
-        #                            transform=handlebox.get_transform())
-        handlebox.add_artist(patch)
-        return patch
-
-
-# set the legend handler for an alluvial diagram
-Legend.update_default_handler_map({SubDiagram: AlluvialHandler()})

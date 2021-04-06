@@ -1478,6 +1478,8 @@ class SubDiagram(_Initiator):
         self._flows = _ProxyCollection(_flows, label=label)
         self._hspace = hspace
         self._hspace_combine = hspace_combine
+        self._yoff = None  # the vertical offset (from 0)
+        self._column_offset = False  # each column has specific offset
         self.init_layout_yoff(layout, yoff)
         # TODO: setting label position is not implemented yet
         self._label_margin = label_margin
@@ -1610,6 +1612,7 @@ class SubDiagram(_Initiator):
         """Set the layout and vertical offset for all columns."""
         if not np.iterable(yoff):
             yoff = self._nbr_columns * [yoff]
+            self._column_offset = False
         self._yoff = yoff
         # now define the neutral element by addition:
         self._yz = self._yoff[0] - self._yoff[0]
@@ -1710,7 +1713,7 @@ class SubDiagram(_Initiator):
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
         _column = self._columns[col_id]
-        layout = self._layout[col_id]
+        layout = self._layout[col_id]  # so far always 'optimized'
         yoff = self._yoff[col_id]
         col_hspace = self.get_column_hspace(col_id)
         # do the redistribution a certain amount of times
@@ -1720,20 +1723,15 @@ class SubDiagram(_Initiator):
             for block in _column:
                 weights, diffs = [], []
                 b_yc = block.get_yc()
-                if r:
-                    flows = block.inflows + block.outflows
-                else:
-                    flows = block.inflows
-                for flow in flows:
+                for flow in block.inflows:
                     if flow.source is not None:
                         weights.append(flow.flow)
                         diffs.append(b_yc - flow.source.get_yc())
                 if weights:
                     _redistribute = True
-                    new_ycs.append(
-                        b_yc - sum(w * d for w, d in zip(weights,
+                    avg_diff = sum(w * d for w, d in zip(weights,
                                                          diffs)) / sum(weights)
-                    )
+                    new_ycs.append(b_yc - avg_diff)
                 else:
                     new_ycs.append(b_yc)
             if _redistribute:
@@ -1749,6 +1747,7 @@ class SubDiagram(_Initiator):
                 self._update_ycoords(col_id, col_hspace, layout, yoff)
             else:
                 break
+            _column = self._columns[col_id]  # use new order in next iteration
 
     def _pairwise_swapping(self, col_id):
         """TODO: write docstring."""
@@ -1797,7 +1796,7 @@ class SubDiagram(_Initiator):
                     weights.append(in_flow.flow)
                     difference.append(b_yc - in_flow.source.get_yc())
         if sum(weights) == 0:
-            return 0
+            return None  # there are no flows to tie the column so don't tie it
         return -sum(w * d for w, d in zip(weights, difference)) / sum(weights)
 
     def set_column_y(self, column, y_start, hspace):
@@ -1820,16 +1819,22 @@ class SubDiagram(_Initiator):
         if not _column:
             return
         # distribute block according to ordering
-        if _column[0].get_y() is None:
-            ystart = self._yz
-        elif layout == 'optimized' and col_id:
+        if layout == 'optimized' and col_id:
             ystart = self._columns[col_id - 1][0].get_y()
         else:
-            ystart = _column[0].get_y()
+            ystart = self._yz
+        # if _column[0].get_y() is None:
+        #     ystart = self._yz
+        # elif layout == 'optimized' and col_id:
+        #     ystart = self._columns[col_id - 1][0].get_y()
+        # else:
+        #     ystart = _column[0].get_y()
         self.set_column_y(_column, ystart, hspace)
         # determine the y offset of the entire column
-        if layout == 'optimized':
-            yoff = self._best_offset(_column)
+        if layout == 'optimized' or (col_id and not self._column_offset):
+            _yoff = self._best_offset(_column)
+            if _yoff is not None:
+                yoff = _yoff
         else:
             low = _column[0].get_y()
             high = _column[-1].get_y() + _column[-1].get_height()

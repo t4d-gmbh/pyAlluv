@@ -24,10 +24,10 @@ extouts = [[(1, (1, 1, 2), 1)], []]
 alluv = Alluvial(x=['t1', 't2', 't3'], blockprops=dict(width=0.2))
 # Now we add the first subdiagram
 alluv.add(flows=flows, ext=ext, extout=extouts, yoff=0,
-          layout=['top', 'optimized', 'top'])
+          layout=['top', 'top', 'top'])
 # Adding a new subdiagram, using the same flows
-alluv.add(flows=flows, ext=ext, yoff=0,
-          layout='top')
+alluv.add(flows=flows, ext=ext, yoff=7,
+          layout=['top', 'optimized', 'bottom'])
 
 alluv.finish()
 plt.show()

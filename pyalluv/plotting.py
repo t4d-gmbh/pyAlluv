@@ -4,7 +4,7 @@ import logging
 import itertools
 from copy import copy
 from collections import defaultdict
-from weakref import WeakValueDictionary
+from weakref import WeakKeyDictionary, WeakValueDictionary
 import numpy as np
 import matplotlib as mpl
 from datetime import datetime
@@ -322,7 +322,11 @@ class _ArtistProxy:
         return defaults
 
     def set_labelprops(self, **props):
-        self._labelprops = normed_kws(props, Text)
+        _nprops = normed_kws(props, Text)
+        if self._labelprops is None:
+            self._labelprops = _nprops
+        else:
+            self._labelprops.update(_nprops)
 
     def final_labelprops(self, labelprops):
         props = self.default_labelprops()
@@ -443,7 +447,6 @@ class _ArtistProxy:
         """Callback after the creation and init of artist."""
         if self._show_label:
             props = self.final_labelprops(props.get('labelprops'))
-            print('final props', props)
             ax.annotate(self.get_label(), **props)
 
     def create_artist(self, ax, **kwargs):
@@ -862,7 +865,7 @@ class _Flow(_ArtistProxy):
     _artistcls = patches.PathPatch
 
     def __init__(self, flow, source, target, label=None, tags=None,
-                 **kwargs):
+                 crossing=False, **kwargs):
         """
 
         Parameters
@@ -889,6 +892,7 @@ class _Flow(_ArtistProxy):
         self.source = source
         self.target = target
         self.flow = flow
+        self.is_crossing = crossing  # within subdiagram flow (False) or accros
         self._out_pref = 0  # +/-: top/bottom,  2: high prio, 1: low prio
         self._in_pref = 0   # +/-: top/bottom,  2: high prio, 1: low prio
         self._xy1_in, self._xy1_out = None, None
@@ -1468,7 +1472,6 @@ class SubDiagram(_Initiator):
                 # i is the index of the target block
                 for j, flow in enumerate(row):
                     # j is the index of the source block
-                    # TODO: pass kwargs?
                     if flow:
                         _flows.append(_Flow(flow=flow, source=s_col[j],
                                             target=t_col[i]))
@@ -1478,7 +1481,16 @@ class SubDiagram(_Initiator):
         self.init_layout_yoff(layout, yoff)
         # TODO: setting label position is not implemented yet
         self._label_margin = label_margin
+        # Note: generating the layout will reorder within columns so we keep
+        # the original ordering
+        self._columns_original = copy(self._columns)
         self.generate_layout()
+
+    def get_flowprops(self,):
+        return self._flowprops
+
+    def get_initial_columns(self):
+        return self._columns_original
 
     def __iter__(self):
         return iter(self._columns)
@@ -1703,21 +1715,24 @@ class SubDiagram(_Initiator):
         col_hspace = self.get_column_hspace(col_id)
         # do the redistribution a certain amount of times
         _redistribute = False
-        for _ in range(self._redistribute_vertically):
+        for r in range(self._redistribute_vertically):
             new_ycs = []
             for block in _column:
-                weights = []
-                difference = []
+                weights, diffs = [], []
                 b_yc = block.get_yc()
-                for in_flow in block.inflows:
-                    if in_flow.source is not None:
-                        weights.append(in_flow.flow)
-                        difference.append(b_yc - in_flow.source.get_yc())
+                if r:
+                    flows = block.inflows + block.outflows
+                else:
+                    flows = block.inflows
+                for flow in flows:
+                    if flow.source is not None:
+                        weights.append(flow.flow)
+                        diffs.append(b_yc - flow.source.get_yc())
                 if weights:
                     _redistribute = True
                     new_ycs.append(
-                        b_yc - sum(w * d for w, d in
-                                   zip(weights, difference)) / sum(weights)
+                        b_yc - sum(w * d for w, d in zip(weights,
+                                                         diffs)) / sum(weights)
                     )
                 else:
                     new_ycs.append(b_yc)
@@ -1777,7 +1792,8 @@ class SubDiagram(_Initiator):
         for block in column:
             b_yc = block.get_yc()
             for in_flow in block.inflows:
-                if in_flow.source is not None:
+                # we don't want crossing flows to affect the offset
+                if in_flow.source is not None and not in_flow.is_crossing:
                     weights.append(in_flow.flow)
                     difference.append(b_yc - in_flow.source.get_yc())
         if sum(weights) == 0:
@@ -1905,6 +1921,8 @@ class SubDiagram(_Initiator):
             _kwargs = dict(kwargs)
             _kwargs.update(self._flowprops)
             if self.stale:
+                # TODO: this is not necessary as create_block_artist is called
+                # by alluvial directly
                 self.generte_layout()
                 self.create_block_artists(self, ax=ax, **kwargs)
             # _flowkws = normed_kws(_kwargs, self._flows._artistcls)
@@ -2003,8 +2021,11 @@ class Alluvial(_Initiator):
             self.ax.xaxis.update_units(self._x)
         else:
             self._x = None
+        self._diag_map = WeakValueDictionary()  # use weakly-refed collections
+        self._blocks = WeakKeyDictionary()      # to access blocks through alluv
         self._diagrams = []
-        self._cross_flows = []
+        self._diag_cross_flows = []
+        self._cross_flows = _ProxyCollection([])
         self._tags = defaultdict(_Tag)
         self._extouts = []
         self._diagc = 0
@@ -2080,7 +2101,7 @@ class Alluvial(_Initiator):
         """TODO: write docstring."""
         return self._diagrams[diag_id]
 
-    def _to_cols_and_flows(self, cinit, flows, ext, extout, fractionflow):
+    def _to_cols_and_flows(self, cinit, flows, ext, fractionflow):
         """
         Create the columns of an alluvial diagram and convert fractional flows
         to absolute quantities.
@@ -2103,8 +2124,6 @@ class Alluvial(_Initiator):
                 else:
                     _col = e
                 columns.append(_col)
-        if extout is not None:
-            pass  # TODO: check extout format
         return columns, flows
 
     def _set_blockprops(self, block_kws, other_kws=None):
@@ -2334,13 +2353,10 @@ class Alluvial(_Initiator):
                 if nbr_cols is None:
                     nbr_cols = 1
                 ext = np.zeros(nbr_cols)  # Note: we overwrite ext in this case
-        columns, flows = self._to_cols_and_flows(cinit, flows, ext, extout,
+        columns, flows = self._to_cols_and_flows(cinit, flows, ext,
                                                  fractionflow)
-
-        # TODO: extout are not processed so far
-
-        self._extouts.append(extout)
-        return self._add(columns=columns, flows=flows, **kwargs)
+        return self._add(columns=columns, flows=flows, extouts=extout,
+                         **kwargs)
 
     # TODO: add support for changing axis=0/1 in case of pandas df
     def add_from_memberships(self, memberships, absentval=None, **kwargs):
@@ -2396,7 +2412,8 @@ class Alluvial(_Initiator):
         # x, columns = self._determine_x(x, columns)
         return self._add(columns, flows, **kwargs)
 
-    def _add(self, columns, flows, blockprops=None, flowprops=None, **kwargs):
+    def _add(self, columns, flows, extouts=None, blockprops=None,
+             flowprops=None, **kwargs):
         """TODO: write docstring."""
         # get the default initiation parameters for a subdiagram
         _subd_init = dict(self._subd_init)
@@ -2416,9 +2433,7 @@ class Alluvial(_Initiator):
         diagram = SubDiagram(columns=columns, flows=flows, label=label,
                              blockprops=_blockprops, flowprops=_flowprops,
                              **_subd_init)
-        # get the styling params
-        self._add_diagram(diagram)
-        self._diagc += 1
+        self._add_diagram(diagram, extouts)
         return diagram
 
     def _determine_x(self, x, columns):
@@ -2431,11 +2446,53 @@ class Alluvial(_Initiator):
             x, columns = index_of(columns)
         return x, columns
 
-    def _add_diagram(self, diagram):
+    def _add_diagram(self, diagram, extouts=None):
         """
         Add a new subdiagram to the Alluvial diagram.
         """
+        # add it to the list of subdiagrams
         self._diagrams.append(diagram)
+        self._diagc = len(self._diagrams)
+        # include newly added blocks
+        diag_id = self._diagc - 1
+        self._diag_map[diag_id] = diagram
+        self._blocks[diagram] = dict()
+        initial_columns = diagram.get_initial_columns()
+        if extouts is not None:  # add the extouts
+            for i, col in enumerate(initial_columns[:-1]):
+                if col_extout := extouts[i]:
+                    for extout in col_extout:
+                        # replace the index with actual block
+                        source_block = col[extout[0]]
+                        self._extouts.append((source_block, extout[1],
+                                              extout[2]))
+        for i, col in enumerate(diagram.get_initial_columns()):
+            self._blocks[diagram][i] = WeakValueDictionary({j: block
+                                                            for j, block
+                                                            in enumerate(col)})
+        # now resolve existing extouts
+        self._diag_cross_flows.append([])  # each subdiagram has its own cflows
+        _extouts = []  # will collect all not (yet) resolvable crossflows
+        for extout in self._extouts:
+            if extout and extout[1][0] <= diag_id:
+                target_block = self._fetch_block(*extout[1])
+                source_block = extout[0]
+                flow = extout[2]
+                cflow = _Flow(flow=flow, source=source_block,
+                              target=target_block, crossing=True)
+                self._cross_flows.add_proxy(cflow)  # add to proxy collection
+                # add the flow to the cross_flows to the corresponding subd
+                self._diag_cross_flows[extout[1][0]].append(cflow)
+                # add the flow to the height of the target block
+                target_block.set_height(target_block.get_height() + flow)
+                # stale the subidagram to enforce regenerating the layout
+                self._diagrams[extout[1][0]].stale = True
+            else:
+                _extouts.append(extout)
+        self._extouts = _extouts
+
+    def _fetch_block(self, diag_id, col_id, block_pos):
+        return self._blocks[self._diag_map[diag_id]][col_id][block_pos]
 
     def _create_collections(self):
         """TODO: write docstring."""
@@ -2455,6 +2512,7 @@ class Alluvial(_Initiator):
         for subd in self._diagrams:
             subd.supplement_x(x_values)
 
+        # TODO: kind of arbitrary place to set the zorder
         diag_zorder = 4
         subd_defaults = []
         for diagram in self._diagrams:
@@ -2467,10 +2525,21 @@ class Alluvial(_Initiator):
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
                                          **defaults)
         diag_zorder -= diag_zorder
-        # ###
-        # TODO: first draw the inter sub-diagram flows (corss-flows)
-        # ###
-
+        # Note: we first draw the cross flows as the first flows to request an
+        # attach location on blocks will get exterior positions, which is what
+        # cross flows should get as we expect bigger vertical spans when
+        # connecting blocks between subidagrams.
+        for cross_flows, _defaults, diagram in zip(self._diag_cross_flows,
+                                                   subd_defaults,
+                                                   self._diagrams):
+            defaults = dict(_defaults)
+            defaults.update(self._flowprops)  # update with alluv flowprops
+            defaults.update(diagram.get_flowprops())  # with subd flowprops
+            # set the properties of individual flow
+            for cflow in cross_flows:
+                cflow.update(**defaults)
+        # finally: draw the artist collection of crossflows
+        self._cross_flows.create_artist(ax=self.ax, zorder=diag_zorder)
         # now draw all other flows
         for diagram, _defaults in zip(self._diagrams, subd_defaults):
             defaults = dict(_defaults)
@@ -2510,12 +2579,8 @@ class Alluvial(_Initiator):
         """Draw the Alluvial diagram."""
         if self.staled_layout:
             # TODO: advise subds to generate layout
-            # TODO: draw the flows in extouts
             self.staled_layout = False
         self._create_collections()
-        # now add labels if required
-        # TODO: IMPLEMENT THE LABEL ADDING
-
         # do some styling of the axes
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')

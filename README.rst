@@ -1,3 +1,7 @@
+[![Python package](https://github.com/tools4digits/pyAlluv/actions/workflows/run_pytest.yml/badge.svg)](https://github.com/tools4digits/pyAlluv/actions/workflows/run_pytest.yml)
+
+*Everything below is old...*
+
 =======
 pyAlluv
 =======

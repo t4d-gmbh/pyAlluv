@@ -1,7 +1,7 @@
 """
-================================
-Alluvial Demo - Membership based
-================================
+=================================
+Alluvial Demo - Network structure
+=================================
 
 Draw Alluvial diagram based on membership lists to reflect changes in network
 structure.
@@ -16,7 +16,6 @@ memberships = [[0, 1, 1, 2],  # t1
                [3, 0, 1, 2],  # t2
                [1, 0, 1, 1]]  # t3
 
-
 # Create an alluvial diagram based on the memberships
 Alluvial.from_memberships(memberships, layout='top', x=['t1', 't2', 't3'],
                           width=0.2)
@@ -24,32 +23,30 @@ Alluvial.from_memberships(memberships, layout='top', x=['t1', 't2', 't3'],
 plt.show()
 
 #############################################################################
-# ==========================
-# Alluvial Demo - Flow based
-# ==========================
+# =======================
+# Alluvial Demo - Layouts
+# =======================
 #
-# Draw Alluvial using flow matrices
+# Draw Alluvial diagrams with different layouts
 #
 import matplotlib.pyplot as plt
 import numpy as np
 # from matplotlib.alluvial import Alluvial
 from pyalluv import Alluvial
 
-ext = np.array([1, 2, 1])
-flows = [[[0, 1, 0],
-          [0, 1, 0],
-          [0, 0, 1],
-          [1, 0, 0]],
-         [[0, 1, 0, 0],
-          [1, 0, 1, 1]]]
-# memberships = [[0, 1, 1, 2],  # t1
-#                [3, 0, 1, 2],  # t2
-#                [1, 0, 1, 1]]  # t3
+memberships = [[0, 1, 1, 2],  # t1
+               [3, 0, 1, 2],  # t2
+               [1, 0, 1, 1]]  # t3
 
-# Create an alluvial diagram based on the memberships
-alluv = Alluvial(x=['t1', 't2', 't3'], flows=flows, ext=ext, width=0.2, yoff=0,
-                 layout=['top', 'optimized', 'top'])
-# label block
+layouts = ['centered', 'bottom', 'top']
+y_offsets = [0, 3, -3]
+alluv = Alluvial(x=['t1', 't2', 't3'], width=0.4)
+for layout, yoff in zip(layouts, y_offsets):
+    # Create an alluvial diagram based on the memberships using a centered layout
+    alluv.add_from_memberships(memberships, layout=layout, yoff=yoff)
+# TODO: Adding labels for sub-diagrams
+# Tell alluvial to determine the layout and draw the diagrams
+alluv.finish()
 
 plt.show()
 

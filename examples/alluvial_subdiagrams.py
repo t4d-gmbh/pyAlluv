@@ -12,12 +12,12 @@ import numpy as np
 from pyalluv import Alluvial
 
 ext = np.array([1, 3, 1])
-flows = np.array([[[0, 1, 0],
-                   [0, 1, 0],
-                   [0, 0, 1],
-                   [1, 0, 0]],
-                  [[0, 1, 0, 0],
-                   [1, 0, 1, 1]]])
+flows = [[[0, 1, 0],
+          [0, 1, 0],
+          [0, 0, 1],
+          [1, 0, 0]],
+         [[0, 1, 0, 0],
+          [1, 0, 1, 1]]]
 extouts = [[(1, (1, 1, 2), 1)], []]
 
 # Start with an empty alluvial plot

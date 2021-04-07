@@ -2462,7 +2462,9 @@ class Alluvial(_Initiator):
         initial_columns = diagram.get_initial_columns()
         if extouts is not None:  # add the extouts
             for i, col in enumerate(initial_columns[:-1]):
-                if col_extout := extouts[i]:
+                # if col_extout := extouts[i]:  # maybe later
+                col_extout = extouts[i]
+                if col_extout:
                     for extout in col_extout:
                         # replace the index with actual block
                         source_block = col[extout[0]]

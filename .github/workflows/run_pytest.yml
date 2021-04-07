@@ -27,11 +27,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest
-        git clone https://github.com/matplotlib/matplotlib.git
-        cd matplotlib
-        python -m pip install .
-        cd ../
-        rm -rf matplotlib
+        python -m pip install matplotlib==3.4.0
         python -m pip install pandas
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8

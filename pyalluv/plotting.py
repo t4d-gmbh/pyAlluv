@@ -1590,7 +1590,7 @@ class SubDiagram(_Initiator):
         """Set the x coordinates."""
         if self._x is None:
             if x is None:
-                self._x, self._columns = cbook.index_of(self._columns)
+                self._x = list(range(len(self._columns)))
             else:
                 # set the x values put only use the number of columns
                 self._x = x[:len(self._columns)]
@@ -2560,17 +2560,17 @@ class Alluvial(_Initiator):
 
     def convert_x(self, x=None):
         if x is None:
-            return np.array([])
+            return []
         elif self.ax.xaxis.units is None:
-            return np.array(x)
+            return list(x)
         else:
-            return self.ax.xaxis.convert_units(x)
+            return list(self.ax.xaxis.convert_units(x))
 
     def x_collected(self):
         """Get the x coordinates of the columns in all sub-diagrams."""
-        combined_x = self.convert_x(self._x).tolist()
+        combined_x = self.convert_x(self._x)
         for diagram in self._diagrams:
-            combined_x.extend(self.convert_x(diagram.get_x()).tolist())
+            combined_x.extend(self.convert_x(diagram.get_x()))
             _ymin, _ymax = diagram.get_ylim()
             self._ylim = (_ymin, _ymax) if self._ylim is None \
                 else (min(self._ylim[0], _ymin), max(self._ylim[1], _ymax))

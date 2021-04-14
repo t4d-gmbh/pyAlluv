@@ -1499,7 +1499,6 @@ class SubDiagram(_Initiator):
 
     def _update_datalim(self):
         """Return the limits of the block collection in data units."""
-        # TODO: set x margin (for now just 1%)
         xmin, xmax = min(self._x), max(self._x)
         # setting some initial y limits
         for _col in self._columns:
@@ -1628,9 +1627,8 @@ class SubDiagram(_Initiator):
         self.stale = True
 
     def generate_layout(self, ):
-        """TODO: write docstring."""
+        """Set the position of all blocks in each column of the sub-diagram."""
         for col_id in range(self._nbr_columns):
-            # TODO: handle the layout parameter
             self._distribute_blocks(col_id)
         # now check if some columns are optimized
         optimizing_col = [i for i, layout in enumerate(self._layout)
@@ -1639,6 +1637,7 @@ class SubDiagram(_Initiator):
             for col_id in optimizing_col:
                 # # now sort again considering the flows.
                 self._decrease_flow_distances(col_id)
+            # TODO: decide if the pair-wise swapping should be kept.
             # for col_id in optimizing_col:
             #     # # perform pairwise swapping for backwards flows
             #     self._pairwise_swapping(col_id)

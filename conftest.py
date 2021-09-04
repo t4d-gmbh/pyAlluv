@@ -22,11 +22,10 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(config, items):
     for marker, info in optional_markers.items():
-        if config.getoption(f"--{marker}"):
-            return
-        skip_devtest = pytest.mark.skip(
-            reason=info['skip-reason'].format(marker=marker)
-        )
-        for item in items:
-            if marker in item.keywords:
-                item.add_marker(skip_devtest)
+        if not config.getoption(f"--{marker}"):
+            skip_devtest = pytest.mark.skip(
+                reason=info['skip-reason'].format(marker=marker)
+            )
+            for item in items:
+                if marker in item.keywords:
+                    item.add_marker(skip_devtest)

@@ -1,37 +1,39 @@
+"""
+Defines test for the alluvial plots.
+"""
 import pytest
 import numpy as np
-from pyalluv import Alluvial
+import pandas as pd
 from matplotlib.testing.decorators import check_figures_equal
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 from matplotlib import pyplot as plt
-import pandas as pd
+
+from pyalluv import Alluvial
 
 
-def _test_block_ordering(alluvial, ref_columns):
+def _test_block_ordering(alluvial, ref_cols):
     # test whether the resulting block ordering in each column reflects
     # the chosen layout (only 'top' and 'bottom')
     columns = alluvial.get_diagrams()[0].get_columns()
     block_heights = [[b.get_height() for b in c]
                      for c in columns]
-    assert block_heights == ref_columns
+    assert block_heights == ref_cols
 
 
 flows = [[[0.8, 0], [0, 0.7], [0, 0.3]], [[0, 1, 0], [0.5, 0, 1]]]
 test_data = [
     # (flows, ext, fractionflow, layout, layout, (resulting) columns
-    (flows, [10, 10], True, 'top', [[10., 10.], [8., 7., 3.][::-1], [7., 7.]]),
+    (flows, [10, 10], True, 'top'),
     (flows, [[10, 10], [1, 1, 1], [2, 0.5]], True,
-     ['bottom', 'top', 'bottom'], [[10., 10.], [9., 8., 4.][::-1], [10., 9.]]),
-    pytest.param(flows, None, True, 'top',
-                 [[10., 10.], [8., 7., 3.], [7., 7.]],
-                 marks=pytest.mark.xfail),
-    (np.atleast_2d(*flows), np.array([10, 10]), True, 'bottom',
-     [[10., 10.], [8., 7., 3.], [7., 7.]]),
+        ['bottom', 'top', 'bottom']),
+    pytest.param(flows, None, True, 'top', marks=pytest.mark.xfail),
+    (np.atleast_2d(*flows), np.array([10, 10]), True, 'bottom'),
     (np.atleast_2d(*flows), np.atleast_1d([10, 10], [1, 1, 1], [2, 0.5]), True,
-     'top', [[10., 10.], [9., 8., 4.][::-1], [10., 9.][::-1]]),
-    pytest.param(np.atleast_2d(flows), None, True, 'bottom',
-                 [[10., 10.], [8., 7., 3.], [7., 7.]], marks=pytest.mark.xfail)
+     'top'),
+    pytest.param(np.atleast_2d(flows),
+                 None, True, 'bottom',
+                 marks=pytest.mark.xfail)
 ]
 test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'lists-fractionflows-extMissing', 'arrays-fractionflows',
@@ -39,29 +41,28 @@ test_ids = ['lists-fractionflows', 'lists-fractionflows-extInitOnly',
             'arrays-fractionflows-extMissing']
 
 
-@pytest.mark.parametrize('flows, ext, fractionflow, layout, ref_columns',
+@pytest.mark.parametrize('flows, ext, fractionflow, layout',
                          test_data, ids=test_ids)
-class TestAlluvialFlows:
-    def test_simple_alluvial(self, ext, flows, fractionflow, layout,
-                             ref_columns):
+class TestAlluvialCreation:
+    """Testsuite for the creation of alluvial diagrams"""
+    def test_simple_alluvial(self, ext, flows, fractionflow, layout):
         # test creation of alluvial via __init__ directly.
-        alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
-                            layout=layout, blockprops=dict(width=1))
-        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        Alluvial(flows=flows, ext=ext, fractionflow=fractionflow,
+                 layout=layout, blockprops=dict(width=1))
+        # TODO: ordering might not really what is to test here
+        # _test_block_ordering(alluvial)
 
     # @pytest.mark.skip(reason="later")
-    def test_alluvial_creation(self, ext, flows, fractionflow, layout,
-                               ref_columns):
+    def test_alluvial_creation(self, ext, flows, fractionflow, layout):
         # test creation of alluvial diagram with add and finish
         alluvial = Alluvial()
         alluvial.add(flows=flows, ext=ext, fractionflow=fractionflow,
                      layout=layout, blockprops=dict(width=1))
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        # _test_block_ordering(alluvial)
 
-    def test_multiple_subdiagrams(self, ext, flows, fractionflow, layout,
-                                  ref_columns):
+    def test_multiple_subdiagrams(self, ext, flows, fractionflow, layout):
         # dev-test
         # several sub diagrams with add and finish
         alluvial = Alluvial()
@@ -71,8 +72,7 @@ class TestAlluvialFlows:
                      layout=layout, blockprops=dict(width=1))
         alluvial.finish()
         # TODO: ordering might not really what is to test here
-        _test_block_ordering(alluvial, ref_columns=ref_columns)
-        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        # _test_block_ordering(alluvial)
 
 
 memberships = [[0, 1, 1, 2], [3, 0, 1, 2], [1, 1, 1, 0]]
@@ -115,7 +115,7 @@ class TestAlluvialLayout:
     def test_vertical_ordering(self, flows, ext, fractf, layout, ref_columns):
         alluvial = Alluvial(flows=flows, ext=ext, fractionflow=fractf,
                             layout=layout, blockprops=dict(width=0.2))
-        _test_block_ordering(alluvial, ref_columns=ref_columns)
+        _test_block_ordering(alluvial, ref_columns)
         # dev-test
         # Make sure the ordering is as expected for 'top', 'bottom', 'centered'
         # and 'optimized'
@@ -126,25 +126,25 @@ class TestAlluvialLayout:
 
     @pytest.mark.devtest
     def test_yoff(self, flows, ext, fractf, layout, ref_columns):
-        raise NotImplementedError()
+        # 
         from pyalluv import Alluvial
         a = Alluvial.from_memberships(
             [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
             blockprops=dict(width=0.2), hspace_combine='divide'
         )
-        a.add_form_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
+        a.add_from_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
                                layout='top', blockprops=dict(width=0.2),
-                               hspace_combine='divide', yoff=-2)
+                               hspace_combine='divide', yoff=-4)
         a.add_from_memberships([[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]],
                                layout='bottom', blockprops=dict(width=0.2),
-                               hspace_combine='divide', yoff=2)
+                               hspace_combine='divide', yoff=4)
         a.finish()
         a.ax.set_xlim(-1, 4)
-        a.ax.set_ylim(-4, 8)
-        plt.show()
+        a.ax.set_ylim(-6, 10)
 
 
 class TestAlluvialStyling:
+    """Testsuite related to the styling of elements in an alluvial diagram."""
     @check_figures_equal()
     def test_Block_styling(self, fig_test, fig_ref):
         # Check individual styling of Rectangles.
@@ -201,13 +201,17 @@ class TestAlluvialStyling:
         # refax
         pc = []
         # Alluvial style
-        pc.append(Rectangle((-.5, yoff), width=1, height=1, fc=alluv_c, **style))
+        pc.append(
+            Rectangle((-.5, yoff), width=1, height=1, fc=alluv_c, **style)
+        )
         # SubD style
         pc.append(Rectangle((-0.5, 0), width=1, height=3, fc=subd_c, **style))
         # Tag style
         pc.append(Rectangle((1.5, 0), width=1, height=3, fc=tag_c, **style))
         # Block style
-        pc.append(Rectangle((1.5, yoff), width=1, height=1, fc=block_c, **style))
+        pc.append(
+            Rectangle((1.5, yoff), width=1, height=1, fc=block_c, **style)
+        )
         refax.add_collection(PatchCollection(pc, match_original=True))
         # ###
         # texax
@@ -299,3 +303,31 @@ class TestAlluvialStyling:
         refax.set(frame_on=False)
         refax.set(yticks=[])
         plt.close('all')
+
+    @pytest.mark.devtest
+    @check_figures_equal()
+    def test_repeated_finish(self, fig_test, fig_ref):
+        # Make sure that repeated finish calls do not change the styling
+        from pyalluv import Alluvial
+        # ###
+        # refax
+        refax = fig_ref.subplots()
+        a = Alluvial.from_memberships(
+            [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
+            blockprops=dict(width=0.2), hspace_combine='divide',
+            ax=refax
+        )
+        # Alluvial.from_memberships calls finish already, a second call should
+        # not lead t any changes
+        tesax = fig_test.subplots()
+        a = Alluvial.from_memberships(
+            [[0, 1, 1, 2], [3, 0, 1, 2], [1, 0, 1, 1]], layout='centered',
+            blockprops=dict(width=0.2), hspace_combine='divide',
+            ax=tesax
+        )
+        # here, we call finish again
+        a.finish()
+        refax.set_xlim(-1, 4)
+        tesax.set_xlim(-1, 4)
+        refax.set_ylim(-6, 10)
+        tesax.set_ylim(-6, 10)

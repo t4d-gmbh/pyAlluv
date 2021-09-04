@@ -2,14 +2,14 @@ import functools
 import inspect
 import logging
 import itertools
-import numpy as np
 from copy import copy
 from collections import defaultdict
 from weakref import WeakKeyDictionary, WeakValueDictionary
 from datetime import datetime
+import numpy as np
 import matplotlib as mpl
 import matplotlib.ticker as mticker
-import matplotlib.patches as patches
+from matplotlib import patches
 from matplotlib.cbook import index_of
 from matplotlib.cbook import normalize_kwargs as normed_kws
 from matplotlib.collections import PatchCollection
@@ -451,7 +451,8 @@ class _ArtistProxy:
         props = normed_kws(kwargs, self._artistcls)
         props = self._pre_creation(ax=ax, **props)  # run prepare callback
         props, na_props = self._applicable(props)
-        self._init_artist(ax)                # initiate artist with defaults
+        if self._artist is None:
+            self._init_artist(ax)            # initiate artist with defaults
         self._update_artist(**props)         # apply collected properties
         self._post_creation(ax, **na_props)  # wrap-up callback
 
@@ -721,9 +722,9 @@ class _Block(_ArtistProxy):
 
     def get_datalim(self,):
         """Return the bounds (x0, y0, width, height) in data coordinates."""
-        x0, width = self.get_xlim()
-        y0, height = self.get_ylim()
-        return x0, y0, width, height
+        x_0, width = self.get_xlim()
+        y_0, height = self.get_ylim()
+        return x_0, y_0, width, height
 
     def add_flow(self, flow, out=False):
         """Add a flow either to the out- or the inflows."""
@@ -1134,6 +1135,7 @@ class _ProxyCollection(_ArtistProxy):
         props = super()._pre_creation(ax=ax, **props)
         self._match_original = False
         for proxy in self._proxies:
+
             proxy.create_artist(ax=ax, **props)
             if proxy.is_styled:
                 self._match_original = True
@@ -1200,8 +1202,8 @@ class _Tag(cm.ScalarMappable):
         self._is_stroked = True  # be set by a tag.
         self._alpha = None
         self._mappable = None
-        self._mappables = dict()
-        self._props = dict()
+        self._mappables = {}
+        self._props = {}
         self.stale = True
 
     def _update_scalarmappable(self):
@@ -1901,6 +1903,7 @@ class SubDiagram(_Initiator):
             return False
 
     def create_block_artists(self, ax, **kwargs):
+        """Initiate the artist for all blocks."""
         if self._blocks:
             if self.stale:
                 self.generate_layout()
@@ -2025,6 +2028,7 @@ class Alluvial(_Initiator):
         self._diag_map = WeakValueDictionary()  # use weakly-refed collections
         self._blocks = WeakKeyDictionary()      # to access blocks through alluv
         self._diagrams = []
+        self._diagrams_defaults = []
         self._diag_cross_flows = []
         self._cross_flows = _ProxyCollection([])
         self._tags = defaultdict(_Tag)
@@ -2416,6 +2420,7 @@ class Alluvial(_Initiator):
     def _add(self, columns, flows, extouts=None, blockprops=None,
              flowprops=None, **kwargs):
         """TODO: write docstring."""
+        self.staled_layout = True
         # get the default initiation parameters for a subdiagram
         _subd_init = dict(self._subd_init)
         _kwargs = normed_kws(kwargs, _ProxyCollection._artistcls)
@@ -2517,23 +2522,25 @@ class Alluvial(_Initiator):
 
         # TODO: kind of arbitrary place to set the zorder
         diag_zorder = 4
-        subd_defaults = []
-        for diagram in self._diagrams:
+        for i, diagram in enumerate(self._diagrams):
             # register the defaults to reuse them for the flows
-            subd_defaults.append(dict(self.get_defaults()))  # keep for flows
-            defaults = dict(subd_defaults[-1])
+            if i == len(self._diagrams_defaults):
+                self._diagrams_defaults.append(dict(self.get_defaults()))
+            defaults = dict(self._diagrams_defaults[-1])
             defaults.update(self._blockprops)
             # TODO: Probably should not mess with the zorder, but at least
             # make it a property of Alluvial...
             diagram.create_block_artists(ax=self.ax, zorder=diag_zorder,
                                          **defaults)
+        # todel: this is just a consistency test
+        assert len(self._diagrams) == len(self._diagrams_defaults)
         diag_zorder -= diag_zorder
         # Note: we first draw the cross flows as the first flows to request an
         # attach location on blocks will get exterior positions, which is what
         # cross flows should get as we expect bigger vertical spans when
         # connecting blocks between subidagrams.
         for cross_flows, _defaults, diagram in zip(self._diag_cross_flows,
-                                                   subd_defaults,
+                                                   self._diagrams_defaults,
                                                    self._diagrams):
             defaults = dict(_defaults)
             defaults.update(self._flowprops)  # update with alluv flowprops
@@ -2544,7 +2551,7 @@ class Alluvial(_Initiator):
         # finally: draw the artist collection of crossflows
         self._cross_flows.create_artist(ax=self.ax, zorder=diag_zorder)
         # now draw all other flows
-        for diagram, _defaults in zip(self._diagrams, subd_defaults):
+        for diagram, _defaults in zip(self._diagrams, self._diagrams_defaults):
             defaults = dict(_defaults)
             defaults.update(self._flowprops)
             diagram.create_flow_artists(ax=self.ax, zorder=diag_zorder,
@@ -2581,9 +2588,9 @@ class Alluvial(_Initiator):
     def finish(self,):
         """Draw the Alluvial diagram."""
         if self.staled_layout:
+            self._create_collections()
             # TODO: advise subds to generate layout
             self.staled_layout = False
-        self._create_collections()
         # do some styling of the axes
         # TODO: make this a function of the layout
         self.ax.xaxis.set_ticks_position('bottom')

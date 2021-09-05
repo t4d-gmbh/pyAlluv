@@ -1319,7 +1319,7 @@ class SubDiagram(_Initiator):
     """
     def __init__(self, columns, flows, x=None, label=None, yoff=0, vspace=1,
                  vspace_combine='divide', label_margin=(0, 0),
-                 layout='centered', blockprops=None, flowprops=None,
+                 columnprops=None, blockprops=None, flowprops=None,
                  tags=None):
         """
         Parameters
@@ -1364,24 +1364,34 @@ class SubDiagram(_Initiator):
 
             .. TODO:
                 This should be in points.
-        layout : sequence or str, default: 'centered'
-            The type of layout used to display the diagram.
-            Allowed layouts are: {'centered', 'bottom', 'top', 'optimized'}.
+        columnprops : dict, optional
+            Determines the column layout of the diagram.
+            Each property can be specified for the entire diagram or as a
+            sequence of M elements that specify the property for each of the M
+            columns in the diagram.
 
-            If as sequence is provided, the M elements must specify the layout
-            for each of the M columns in the diagram.
+            Allowed parameter:
+            ~~~~~~~~~~~~~~~~~~
 
-            The following options are available:
+            assort : sequence or str, default: 'centered'
+                The assortment of blocks to used to display the diagram.
+                Allowed values are: {'centered', 'bottom', 'top'}.
 
-            - 'centered' (default): The bigger the block (in terms of height)
-              the more it is moved towards the center.
-            - 'bottom': Blocks are sorted according to their height with the
-              biggest blocks at the bottom.
-            - 'top': Blocks are sorted according to their height with the
-              biggest blocks at the top.
-            - 'optimized': Starting from a centered layout the order of bocks
-              in a column is iteratively changed to decrease the vertical
-              displacement of all flows attached to the column.
+                - 'centered' (default): The bigger the block (in terms of
+                  height) the more it is moved towards the center.
+                - 'bottom': Blocks are sorted according to their height with
+                  the biggest blocks at the bottom.
+                - 'top': Blocks are sorted according to their height with the
+                  biggest blocks at the top.
+            optimize : sequence or bool, default: True
+                Optimize the block ordering within a column to minimize
+                vertical flows. If set to `True` the chosen `assort` is altered
+                to decrease the vertical displacement of all flows attached to
+                the column.
+            aligned : sequence or bool, default: True
+                TODO: This is not implemented yet! If set to False, bottom and
+                top columns should be displaced.
+            
         blockprops : dict, optional
             Styling parameter that are applied to all blocks in this diagram.
             For a list of possible parameter see the list for Collection below.
@@ -1479,7 +1489,17 @@ class SubDiagram(_Initiator):
         self._vspace_combine = vspace_combine
         self._yoff = None  # the vertical offset (from 0)
         self._column_offset = False  # each column has specific offset
-        self.init_layout_yoff(layout, yoff)
+        # handle the column properties
+        # TODO: decide how to handle default values
+        if isinstance(columnprops, dict):
+            self._columnprops = copy(columnprops)
+        else:
+            self._columnprops = {
+                'assort': 'centered',
+                'optimize': True,
+                'aligned': True
+            }
+        self.init_col_props(yoff)
         # TODO: setting label position is not implemented yet
         self._label_margin = label_margin
         # Note: generating the layout will reorder within columns so we keep
@@ -1599,33 +1619,44 @@ class SubDiagram(_Initiator):
                 for block in col:
                     block.set_xa(xi)
 
-    def set_column_layout(self, col_id, layout):
+    def set_column_assort(self, col_id, assort):
         """Set the layout for a single column"""
         # TODO: uncomment once in mpl
-        # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
-        #                    layout=layout)
-        self._layout[col_id] = layout
+        # _api.check_in_list(['centered', 'top', 'bottom'],
+        #                    assort=assort)
+        self._assort[col_id] = assort 
 
-    def init_layout_yoff(self, layout, yoff):
-        """Set the layout and vertical offset for all columns."""
+    def init_col_props(self, yoff):
+        """Set the properties for the column layouts."""
         if not np.iterable(yoff):
             yoff = self._nbr_columns * [yoff]
             self._column_offset = False
         self._yoff = yoff
         # define the neutral element by subtraction
         self._yz = self._yoff[0] - self._yoff[0]
-        if isinstance(layout, str):
+        assort = self._columnprops['assort']
+        optimize = self._columnprops['optimize']
+        aligned = self._columnprops['aligned']
+        if isinstance(assort, str):
             # TODO: uncomment once in mpl
-            # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
-            #                    layout=layout)
-            self._layout = [layout for _ in range(self._nbr_columns)]
+            # _api.check_in_list(['centered', 'top', 'bottom'],
+            #                    assort=assort)
+            self._assort = [assort for _ in range(self._nbr_columns)]
         else:
-            self._layout = []
-            for _layout in layout:
+            self._assort = []
+            for _assort in assort:
                 # TODO: uncomment once in mpl
-                # _api.check_in_list(['centered', 'top', 'bottom', 'optimized'],
-                #                    layout=layout)
-                self._layout.append(_layout)
+                # _api.check_in_list(['centered', 'top', 'bottom'],
+                #                    assort=_assort)
+                self._assort.append(_assort)
+        if isinstance(optimize, bool):
+            self._optimize = [optimize for _ in range(self._nbr_columns)]
+        else:
+            self._optimize = optimize
+        if isinstance(aligned, bool):
+            self._aligned = [aligned for _ in range(self._nbr_columns)]
+        else:
+            self._aligned = aligned
         self.stale = True
 
     def generate_layout(self, ):
@@ -1633,8 +1664,8 @@ class SubDiagram(_Initiator):
         for col_id in range(self._nbr_columns):
             self._distribute_blocks(col_id)
         # now check if some columns are optimized
-        optimizing_col = [i for i, layout in enumerate(self._layout)
-                          if 'opt' in layout]
+        optimizing_col = [i for i, optimize in enumerate(self._optimize)
+                          if optimize]
         if len(optimizing_col):
             for col_id in optimizing_col:
                 # # now sort again considering the flows.
@@ -1688,9 +1719,9 @@ class SubDiagram(_Initiator):
 
         """
         nbr_blocks = len(self._columns[col_id])
-        layout = self._layout[col_id]
+        assort = self._assort[col_id]
         yoff = self._yoff[col_id]
-        # NOTE: getting layout and yoff here but also passing col_id to
+        # NOTE: getting assort and yoff here but also passing col_id to
         #       _update_ycorrd is not clean at all.
         col_vspace = self.get_column_vspace(col_id)
         if nbr_blocks:
@@ -1699,20 +1730,20 @@ class SubDiagram(_Initiator):
                 *sorted(enumerate(self._columns[col_id]),
                         key=lambda x: x[1].get_height())
             )
-            # if layout == 'top':
-            if layout.startswith('bottom'):
+            # if assort == 'top':
+            if assort == 'bottom':
                 ordering = ordering[::-1]
-            elif layout.startswith('centered'):
+            elif assort == 'centered':
                 # sort so to put biggest height in the middle
                 ordering = ordering[::-2][::-1] + \
                     ordering[nbr_blocks % 2::2][::-1]
             self._reorder_column(col_id, ordering)
-            self._update_ycoords(col_id, col_vspace, layout, yoff)
+            self._update_ycoords(col_id, col_vspace, assort, yoff)
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
         _column = self._columns[col_id]
-        layout = self._layout[col_id]
+        assort = self._assort[col_id]
         yoff = self._yoff[col_id]
         col_vspace = self.get_column_vspace(col_id)
         # do the redistribution a certain amount of times
@@ -1743,7 +1774,7 @@ class SubDiagram(_Initiator):
                 # reorder blocks
                 self._reorder_column(col_id, ordering=cs)
                 # redistribute them
-                self._update_ycoords(col_id, col_vspace, layout, yoff)
+                self._update_ycoords(col_id, col_vspace, assort, yoff)
             else:
                 break
             _column = self._columns[col_id]  # use new order in next iteration
@@ -1804,11 +1835,11 @@ class SubDiagram(_Initiator):
             block.set_y(y_start)
             y_start += block.get_height() + vspace
 
-    def _update_ycoords(self, col_id: int, vspace, layout, yoff):
+    def _update_ycoords(self, col_id: int, vspace, assort, yoff):
         """
         Update the y coordinate of the blocks in a column based on the diagrams
-        vertical offset, the layout chosen for this column and the order of the
-        blocks.
+        vertical offset, the assortment chosen for this column and the order of
+        the blocks.
 
         Parameters
         ----------
@@ -1822,29 +1853,31 @@ class SubDiagram(_Initiator):
         #       as expected and might not be needed at all
         # distribute block according to ordering
         ystart = self._yz
-        # if '-opt' in layout and col_id:
-        #     # get the vertical position from the previous column
-        #     # ystart = self._columns[col_id - 1][0].get_y()
+        # TODO: offset does not work as expected. we need a fct that minimizes
+        #       the yoffset by moving an entire column (after sorting)
+        if self._optimize[col_id] and col_id:
+            # get the vertical position from the previous column
+            ystart = self._columns[col_id - 1][0].get_y()
         # else:
         #     ystart = self._yz
         self.set_column_y(_column, ystart, vspace)
         # TODO: unclear whether this is desired
         # determine the y offset of the entire column
-        # if 'opt' in layout:  # or (col_id and not self._column_offset):
-        #     _yoff = self._best_offset(_column)
-        #     if _yoff is not None:
-        #         yoff = _yoff
-        # else:
-        low = _column[0].get_y()
-        high = _column[-1].get_y() + _column[-1].get_height()
-
-        if layout.startswith('centered'):
-            _offset = 0.5 * (high - low)
-        elif layout.startswith('top'):
-            _offset = (high - low)
+        if self._optimize[col_id]:  # or (col_id and not self._column_offset):
+            _yoff = self._best_offset(_column)
+            if _yoff is not None:
+                yoff = _yoff
         else:
-            _offset = 0
-        yoff -= _offset
+            low = _column[0].get_y()
+            high = _column[-1].get_y() + _column[-1].get_height()
+
+            if assort == 'centered':
+                _offset = 0.5 * (high - low)
+            elif assort == 'top':
+                _offset = (high - low)
+            else:
+                _offset = 0
+            yoff -= _offset
         # ###
         # set the y position again including the offset
         y_position = _column[0].get_y() + yoff
@@ -2740,7 +2773,7 @@ class Alluvial(_Initiator):
         select the block largest block in all columns of all subdiagrams if the
         layout is `'bottom'` and the smallest block in case of `'top'`.
         Therefore, `select_blocks` might be difficult to use on columns with
-        the layouts `'centered'` and `'optimized'`.
+        the layout `centered` and `centered-opt[imized]`.
         """
         subdsel, colsel, blocksel = _separate_selector(*selector)
         blocks = []

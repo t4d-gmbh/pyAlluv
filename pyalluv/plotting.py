@@ -475,7 +475,7 @@ class _Block(_ArtistProxy):
 
     # TODO uncomment once in mpl
     # @docstring.dedent_interpd
-    def __init__(self, height, width=None, xa=None, ya=None, label=None,
+    def __init__(self, height, width=0.1, xa=None, ya=None, label=None,
                  tags=None, ha='center', va='bottom', label_margin=(0, 0),
                  **kwargs):
         """
@@ -1317,8 +1317,8 @@ class SubDiagram(_Initiator):
     A collection of Blocks and Flows belonging to a diagram.
 
     """
-    def __init__(self, columns, flows, x=None, label=None, yoff=0, hspace=1,
-                 hspace_combine='divide', label_margin=(0, 0),
+    def __init__(self, columns, flows, x=None, label=None, yoff=0, vspace=1,
+                 vspace_combine='divide', label_margin=(0, 0),
                  layout='centered', blockprops=None, flowprops=None,
                  tags=None):
         """
@@ -1350,15 +1350,15 @@ class SubDiagram(_Initiator):
             the offset by minimizing the vertical displacement of the flows. If
             a sequence is provided it sets for each column the vertical offset
             explicitly and must be of the same length as *columns*.
-        hspace : float, (default=1)
-            The height reserved for space between blocks expressed as a
-            float in the same unit as the block heights.
-        hspace_combine : {'add', 'divide'}, default: 'divide'
+        vspace : float, (default=1)
+            The vertical space between blocks expressed as a float in the same
+            unit as the block heights.
+        vspace_combine : {'add', 'divide'}, default: 'divide'
             Set how the vertical space between blocks should be combined.
             If set to 'add' (default) the space between two blocks takes
-            the value provided by *hspace*. If set to 'divide' then the sum of
+            the value provided by *vspace*. If set to 'divide' then the sum of
             all spaces between the blocks in a column is set to be equal to
-            *hspace*.
+            *vspace*.
         label_margin : tuple, optional
             determine the offset in points for the label.
 
@@ -1475,8 +1475,8 @@ class SubDiagram(_Initiator):
                         _flows.append(_Flow(flow=flow, source=s_col[j],
                                             target=t_col[i]))
         self._flows = _ProxyCollection(_flows, label=label)
-        self._hspace = hspace
-        self._hspace_combine = hspace_combine
+        self._vspace = vspace
+        self._vspace_combine = vspace_combine
         self._yoff = None  # the vertical offset (from 0)
         self._column_offset = False  # each column has specific offset
         self.init_layout_yoff(layout, yoff)
@@ -1555,10 +1555,10 @@ class SubDiagram(_Initiator):
         # TODO: set x margin (for now just 1%)
         minwidth = self.get_minwidth()
         xmargin = max(0.5 * minwidth, 0.01 * (max(self._x) - min(self._x)))
-        if self._hspace_combine == 'add':
-            ymargin = self._hspace
+        if self._vspace_combine == 'add':
+            ymargin = self._vspace
         else:
-            ymargin = self._hspace / max(len(col) for col in self._columns)
+            ymargin = self._vspace / max(len(col) for col in self._columns)
         return xmin - xmargin, ymin - ymargin, xmax + xmargin, ymax + ymargin
 
     # def get_layout(self):
@@ -1612,7 +1612,7 @@ class SubDiagram(_Initiator):
             yoff = self._nbr_columns * [yoff]
             self._column_offset = False
         self._yoff = yoff
-        # now define the neutral element by addition:
+        # define the neutral element by subtraction
         self._yz = self._yoff[0] - self._yoff[0]
         if isinstance(layout, str):
             # TODO: uncomment once in mpl
@@ -1634,7 +1634,7 @@ class SubDiagram(_Initiator):
             self._distribute_blocks(col_id)
         # now check if some columns are optimized
         optimizing_col = [i for i, layout in enumerate(self._layout)
-                          if layout == 'optimized']
+                          if 'opt' in layout]
         if len(optimizing_col):
             for col_id in optimizing_col:
                 # # now sort again considering the flows.
@@ -1650,14 +1650,14 @@ class SubDiagram(_Initiator):
             #     #                          " implemented")
         self.stale = False
 
-    def get_column_hspace(self, col_id):
-        """TODO: write docstring."""
-        if self._hspace_combine == 'add':
-            return self._hspace
+    def get_column_vspace(self, col_id):
+        """Get the vertical spacing between the blocks in a column"""
+        if self._vspace_combine == 'add':
+            return self._vspace
         else:
             nbr_blocks = len(self._columns[col_id])
             if nbr_blocks > 1:
-                return self._hspace / (nbr_blocks - 1)
+                return self._vspace / (nbr_blocks - 1)
             else:
                 return 0
 
@@ -1690,8 +1690,9 @@ class SubDiagram(_Initiator):
         nbr_blocks = len(self._columns[col_id])
         layout = self._layout[col_id]
         yoff = self._yoff[col_id]
-        # NOTE: getting layout and yoff here but also passing col_id to _update_yorrd is not really clean
-        col_hspace = self.get_column_hspace(col_id)
+        # NOTE: getting layout and yoff here but also passing col_id to
+        #       _update_ycorrd is not clean at all.
+        col_vspace = self.get_column_vspace(col_id)
         if nbr_blocks:
             # sort clusters according to height
             ordering, _column = zip(
@@ -1699,21 +1700,21 @@ class SubDiagram(_Initiator):
                         key=lambda x: x[1].get_height())
             )
             # if layout == 'top':
-            if layout == 'bottom':
+            if layout.startswith('bottom'):
                 ordering = ordering[::-1]
-            elif layout == 'centered' or layout == 'optimized':
+            elif layout.startswith('centered'):
                 # sort so to put biggest height in the middle
                 ordering = ordering[::-2][::-1] + \
                     ordering[nbr_blocks % 2::2][::-1]
             self._reorder_column(col_id, ordering)
-            self._update_ycoords(col_id, col_hspace, layout, yoff)
+            self._update_ycoords(col_id, col_vspace, layout, yoff)
 
     def _decrease_flow_distances(self, col_id):
         """TODO: write docstring."""
         _column = self._columns[col_id]
-        layout = self._layout[col_id]  # so far always 'optimized'
+        layout = self._layout[col_id]
         yoff = self._yoff[col_id]
-        col_hspace = self.get_column_hspace(col_id)
+        col_vspace = self.get_column_vspace(col_id)
         # do the redistribution a certain amount of times
         _redistribute = False
         for r in range(self._redistribute_vertically):
@@ -1742,7 +1743,7 @@ class SubDiagram(_Initiator):
                 # reorder blocks
                 self._reorder_column(col_id, ordering=cs)
                 # redistribute them
-                self._update_ycoords(col_id, col_hspace, layout, yoff)
+                self._update_ycoords(col_id, col_vspace, layout, yoff)
             else:
                 break
             _column = self._columns[col_id]  # use new order in next iteration
@@ -1752,22 +1753,22 @@ class SubDiagram(_Initiator):
         # TODO: this is broken: update the ordering then call _reorder_column
         _column = self._columns[col_id]
         nbr_blocks = len(_column)
-        col_hspace = self.get_column_hspace(col_id)
+        col_vspace = self.get_column_vspace(col_id)
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
                 b1, b2 = _column[i - 1], _column[i]
-                if self._swap_blocks((b1, b2), col_hspace, 'backwards'):
+                if self._swap_blocks((b1, b2), col_vspace, 'backwards'):
                     b2.set_y(b1.get_y())
-                    b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
+                    b1.set_y(b2.get_y() + b2.get_height() + col_vspace)
                     _column[i - 1], _column[i] = b2, b1
         for _ in range(int(0.5 * nbr_blocks)):
             for i in range(1, nbr_blocks):
                 b1, b2 = _column[i - 1], _column[i]
                 # b1 = _column[nbr_blocks - i - 1]
                 # b2 = _column[nbr_blocks - i]
-                if self._swap_blocks((b1, b2), col_hspace, 'forwards'):
+                if self._swap_blocks((b1, b2), col_vspace, 'forwards'):
                     b2.set_y(b1.get_y())
-                    b1.set_y(b2.get_y() + b2.get_height() + col_hspace)
+                    b1.set_y(b2.get_y() + b2.get_height() + col_vspace)
                     _column[i - 1], _column[i] = b2, b1
                     # _column[nbr_blocks - i - 1] = b2
                     # _column[nbr_blocks - i] = b1
@@ -1797,16 +1798,17 @@ class SubDiagram(_Initiator):
             return None  # there are no flows to tie the column so don't tie it
         return -sum(w * d for w, d in zip(weights, difference)) / sum(weights)
 
-    def set_column_y(self, column, y_start, hspace):
+    def set_column_y(self, column, y_start, vspace):
+        """Set the vertical position of the blocks in a column"""
         for block in column:
             block.set_y(y_start)
-            y_start += block.get_height() + hspace
+            y_start += block.get_height() + vspace
 
-    def _update_ycoords(self, col_id: int, hspace, layout, yoff):
+    def _update_ycoords(self, col_id: int, vspace, layout, yoff):
         """
-        Update the y coordinate of the blocks in a column based on the
-        diagrams vertical offset, the layout chosen for this column and the
-        order of the blocks.
+        Update the y coordinate of the blocks in a column based on the diagrams
+        vertical offset, the layout chosen for this column and the order of the
+        blocks.
 
         Parameters
         ----------
@@ -1816,40 +1818,40 @@ class SubDiagram(_Initiator):
         _column = self._columns[col_id]
         if not _column:
             return
+        # TODO: setting ystart based on previous for optimized is not working
+        #       as expected and might not be needed at all
         # distribute block according to ordering
-        if layout == 'optimized' and col_id:
-            ystart = self._columns[col_id - 1][0].get_y()
-        else:
-            ystart = self._yz
-        # if _column[0].get_y() is None:
-        #     ystart = self._yz
-        # elif layout == 'optimized' and col_id:
-        #     ystart = self._columns[col_id - 1][0].get_y()
+        ystart = self._yz
+        # if '-opt' in layout and col_id:
+        #     # get the vertical position from the previous column
+        #     # ystart = self._columns[col_id - 1][0].get_y()
         # else:
-        #     ystart = _column[0].get_y()
-        self.set_column_y(_column, ystart, hspace)
+        #     ystart = self._yz
+        self.set_column_y(_column, ystart, vspace)
+        # TODO: unclear whether this is desired
         # determine the y offset of the entire column
-        if layout == 'optimized' or (col_id and not self._column_offset):
-            _yoff = self._best_offset(_column)
-            if _yoff is not None:
-                yoff = _yoff
-        else:
-            low = _column[0].get_y()
-            high = _column[-1].get_y() + _column[-1].get_height()
+        # if 'opt' in layout:  # or (col_id and not self._column_offset):
+        #     _yoff = self._best_offset(_column)
+        #     if _yoff is not None:
+        #         yoff = _yoff
+        # else:
+        low = _column[0].get_y()
+        high = _column[-1].get_y() + _column[-1].get_height()
 
-            if layout == 'centered':
-                _offset = 0.5 * (high - low)
-            elif layout == 'top':
-                _offset = (high - low)
-            else:
-                _offset = 0
-            yoff -= _offset
+        if layout.startswith('centered'):
+            _offset = 0.5 * (high - low)
+        elif layout.startswith('top'):
+            _offset = (high - low)
+        else:
+            _offset = 0
+        yoff -= _offset
+        # ###
         # set the y position again including the offset
         y_position = _column[0].get_y() + yoff
-        self.set_column_y(_column, y_position, hspace)
+        self.set_column_y(_column, y_position, vspace)
         self.stale = True
 
-    def _swap_blocks(self, blocks, hspace, direction='backwards'):
+    def _swap_blocks(self, blocks, vspace, direction='backwards'):
         """
         Check if swapping to blocks leads to shorter vertical flow distances.
         """
@@ -1873,7 +1875,7 @@ class SubDiagram(_Initiator):
         # assert n1.get_y() < n2.get_y()
         # TODO: Cannot recreate the thought process behind this...
         inv_mid_height = [blocks[0].get_y() + blocks[1].get_height() +
-                          hspace + 0.5 * blocks[0].get_height(),
+                          vspace + 0.5 * blocks[0].get_height(),
                           blocks[0].get_y() + 0.5 * blocks[1].get_height()]
         squared_diff_inf = {}
         for i, block in enumerate(blocks):
@@ -1939,8 +1941,8 @@ class Alluvial(_Initiator):
     Alluvial diagram.
 
         Alluvial diagrams are a variant of flow diagram designed to represent
-        changes in classifications, in particular changes in network
-        structure over time.
+        changes in classifications, in particular it can be used to display
+        changes in network structure over time.
         `Wikipedia (23/1/2021) <https://en.wikipedia.org/wiki/Alluvial_diagram>`_
     """
     # @docstring.dedent_interpd
@@ -1949,6 +1951,9 @@ class Alluvial(_Initiator):
         """
         Create a new Alluvial instance.
 
+        Call signatures::
+
+            Alluvial(flows=flows, ext=ext, )
 
         Parameters
         ===========
@@ -1965,8 +1970,6 @@ class Alluvial(_Initiator):
         ax: `~.axes.Axes`
           Axes onto which the Alluvial diagram should be drawn.
           If *ax* is not provided a new Axes instance will be created.
-        cluster_w_spacing: float, int (default=1)
-          Vertical spacing between blocks.
         blockprops : dict, optional
           The properties used to draw the blocks. *blockprops* accepts all
           arguments for :class:`matplotlib.patches.Rectangle`:
@@ -2011,6 +2014,9 @@ class Alluvial(_Initiator):
           sub-diagrams, unless specific properties are provided when a
           sub-diagram is added (see :meth:`add` for details), or
           :meth:`set_blockprops` is called before adding further sub-diagrams.
+
+        Examples
+        --------
 
         """
         # create axes if not provided
@@ -2199,6 +2205,15 @@ class Alluvial(_Initiator):
         identical length. Further the group identifiers present in a membership
         list must be derived from an enumeration of the groups.
 
+        See Also
+        --------
+        Alluvial
+        Alluvial.add
+
+        Examples
+        --------
+        .. plot:: gallery/speciality_plots/alluvial_layout.py
+
         """
         # create an alluvial instance
         x = kwargs.pop('x', None)
@@ -2323,6 +2338,17 @@ class Alluvial(_Initiator):
           by *flow[i]*, :math:`\textbf{c}_i` the vector of N block sizes in
           column *i* and :math:`\textbf{e}_{i+1}` the external inflow vector of
           shape (P) given by *e[i+1]*.
+
+        See Also
+        --------
+        Alluvial
+        Alluvial.from_memberships
+
+        Examples
+        --------
+        .. plot:: gallery/speciality_plots/alluvial_basics.py
+
+        TODO: Should an inline example be added?
         """
         # TODO: make sure empty flows are accepted
         if flows is not None:
@@ -2381,6 +2407,14 @@ class Alluvial(_Initiator):
         Note that all elements in *memberships* must be membership lists of
         identical length. Further the group identifiers present in a membership
         list must be derived from an enumeration of the groups.
+
+        See Also
+        --------
+        Alluvial.add
+        Alluvial.from_memberships
+
+        Examples
+        --------
 
         """
         memberships = _to_valid_arrays(memberships, 'memberships', np.int)
